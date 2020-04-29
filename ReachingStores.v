@@ -3,12 +3,15 @@
 (* (C) 2020 Nandor Licker. All rights reserved. *)
 
 Require Import Coq.PArith.PArith.
+Require Import Coq.Lists.List.
 
 Require Import LLIR.Maps.
 Require Import LLIR.State.
 Require Import LLIR.Aliasing.
 Require Import LLIR.LLIR.
+Require Import LLIR.Dom.
 
+Import ListNotations.
 
 Open Scope positive_scope.
 
@@ -280,7 +283,75 @@ End Kildall.
 
 Definition reaching_stores := PTrie.t (PTrie.t (PTrie.t reg)).
 
-Axiom analyse_reaching_stores:
+Axiom analyse_reaching_stores: 
   forall (f: func) (aa: points_to_set), reaching_stores.
 
+Section ANALYSIS.
+  Variable f: func.
+
+  Section UTILITIES.
+    Variable aa: points_to_set.
+    Variable rs: reaching_stores.
+
+    Definition get_store_to (k: node) (obj: Object): option reg :=
+      match PTrie.get rs k with
+      | Some objects =>
+        match obj with
+        | (object, offset) =>
+          match PTrie.get objects object with
+          | Some object' =>
+            match PTrie.get object' offset with
+            | Some write => Some write
+            | _ => None
+            end
+          | _ => None
+          end
+        end
+      | _ => None
+      end.
+
+    Inductive stored_at: node -> positive -> positive -> reg -> Prop :=
+      | store_at:
+        forall (n: node) (object: positive) (offset: positive) (val: reg),
+          forall (addr: reg) (next: node),
+            Some (LLSt addr val next) = f.(fn_insts) ! n ->
+            Some [PTOffset object offset] = aa ! addr ->
+            stored_at n object offset val
+      .
+
+    Inductive store_to_at: node -> reg -> positive -> positive -> Prop :=
+      | store:
+        forall (k: node) (val: reg) (object: positive) (offset: positive),
+          Some val = get_store_to k (object, offset) -> 
+          store_to_at k val object offset
+      .
+  End UTILITIES.
+
+  Section PROPERTIES.
+    Variable aa: points_to_set.
+    Variable rs: reaching_stores.
+
+    Theorem reaching_stores_dom:
+      forall (use: node) (objects: PTrie.t (PTrie.t reg))
+             (object: positive) (object': PTrie.t reg)
+             (offset: positive) (write: reg) 
+             (def: node),
+        Some objects = PTrie.get rs use ->
+        Some object' = PTrie.get objects object ->
+        Some write = PTrie.get object' offset ->
+        stored_at aa def object offset write ->
+        Dominates f def use.
+    Admitted.
+
+    Theorem reaching_store_origin:
+      forall (reach: node) (val: reg) (object: positive) (offset: positive),
+        store_to_at rs reach val object offset ->
+          exists (orig: node) (addr: reg) (next: node),
+            stored_at aa orig object offset val
+            /\
+            Dominates f orig reach
+            .
+    Admitted.
+  End PROPERTIES.
+End ANALYSIS.
 

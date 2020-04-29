@@ -14,9 +14,9 @@ COQEXEC=$(COQBIN)coqtop $(COQINCLUDES) -batch -load-vernac-source
 PROOFS=\
 	Values.vo\
 	Maps.vo\
-	Dom.vo\
 	State.vo\
 	LLIR.vo\
+	Dom.vo\
 	Eval.vo\
 	Aliasing.vo\
 	Verify.vo\

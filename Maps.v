@@ -138,6 +138,11 @@ Module PTrie <: PARTIAL_MAP.
       end.
 
     Definition map_opt (a: t A): t B := map_opt_helper a xH.
+
+    Theorem map_opt_correct:
+      forall (t: t A) (k: key) (b: B),
+         Some b = get B (map_opt t) k -> exists a, (Some a = get A t k /\ Some b = f k a).
+    Admitted.
   End MAP_OPT.
 
   Section MAP.
@@ -162,41 +167,48 @@ Module PTrie <: PARTIAL_MAP.
   Fixpoint fold (A: Type) (B: Type) (f: B -> key -> A -> B) (t: t A) (v: B) :=
     fold_helper A B f xH t v.
 
-  Fixpoint to_list_helper (V: Type) (t: t V) (k: key) (acc: list (key * V)) :=
-    match t with
-    | Leaf => acc
-    | Node l None r =>
-      let r' := to_list_helper V r (append (xI xH) k) acc in
-      to_list_helper V r (append (xO xH) k) acc
-    | Node l (Some v) r =>
-      let r' := to_list_helper V r (append (xI xH) k) acc in
-      let v' := (k, v) :: r' in
-      to_list_helper V r (append (xO xH) k) acc
-    end.
+  Section TO_LIST.
+    Variable V: Type.
+    Fixpoint to_list_helper (t: t V) (k: key) (acc: list (key * V)) :=
+      match t with
+      | Leaf => acc
+      | Node l None r =>
+        let r' := to_list_helper r (append (xI xH) k) acc in
+        to_list_helper r (append (xO xH) k) acc
+      | Node l (Some v) r =>
+        let r' := to_list_helper r (append (xI xH) k) acc in
+        let v' := (k, v) :: r' in
+        to_list_helper r (append (xO xH) k) acc
+      end.
 
-  Definition to_list (V: Type) (t: t V) :=
-    to_list_helper V t xH [].
+    Definition to_list (t: t V) := to_list_helper t xH [].
+
+    Theorem to_list_correct:
+      forall (t: t V) (k: key) (v: V),
+        In (k, v) (to_list t) -> Some v = get V t k.
+    Admitted.
+  End TO_LIST.
 
   Section VALUES.
     Variable V: Type.
 
-    Fixpoint values_helper (t: t V) (acc: list V) :=
-      match t with
-      | Leaf => acc
-      | Node l None r => values_helper l (values_helper r acc)
-      | Node l (Some v) r => values_helper l (v :: values_helper r acc)
-      end.
-
-    Fixpoint values (t: t V) := values_helper t nil.
+    Definition values (t: t V) := 
+      List.map (fun elem => match elem with (_, v) => v end) (to_list V t).
 
     Theorem values_correct:
       forall (t: t V) (v: V),
         In v (values t) -> exists k, Some v = get V t k.
     Proof.
-      induction t0; intros v; intros Hind.
-      - inversion Hind.
-      - destruct o.
-        + 
+      intros t v.
+      intros Helem.
+      apply in_map_iff in Helem.
+      destruct Helem as [x H].
+      destruct x as [k].
+      exists k.
+      destruct H as [Heq Hin].
+      rewrite Heq in Hin.
+      apply to_list_correct in Hin.
+      apply Hin.
     Qed.
   End VALUES.
 

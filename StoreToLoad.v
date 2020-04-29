@@ -12,108 +12,159 @@ Require Import LLIR.State.
 Require Import LLIR.Values.
 Require Import LLIR.Verify.
 Require Import LLIR.ReachingStores.
+Require Import LLIR.Dom.
 
 Import ListNotations.
 
 
-Definition Object := (positive * positive)%type.
+Section PROPAGATION.
+  Variable f: func.
+  Variable rs: reaching_stores.
+  Variable aa: points_to_set.
 
-Definition get_load_addr (aa: points_to_set) (addr: reg): option Object :=
-  match PTrie.get aa addr with
-  | Some addrs => 
-    match addrs with
-    | [PTOffset object offset] =>
-      Some (object, offset)
-    | _ => None
-    end
-  | _ => None
-  end.
-
-
-Definition get_store_to (stores: reaching_stores) (k: node) (obj: Object): option reg :=
-  match PTrie.get stores k with
-  | Some objects =>
-    match obj with
-    | (object, offset) =>
-      match PTrie.get objects object with
-      | Some object' =>
-        match PTrie.get object' offset with
-        | Some write => Some write
-        | _ => None
-        end
-      | _ => None
-      end
-    end
-  | _ => None
-  end.
-
-Definition get_propagated_loads (f: func) (stores: reaching_stores) (aa: points_to_set): list (reg * reg) :=
-  PTrie.values (reg * reg) (PTrie.map_opt inst (reg * reg) 
-    (fun k inst =>
-      match inst with
-      | LLLd addr dst next =>
-        match get_load_addr aa addr with
-        | Some obj => 
-          match get_store_to stores k obj with
-          | Some src => Some (dst, src)
+  Definition get_propagated_loads: list (reg * reg) :=
+    PTrie.values (reg * reg) (PTrie.map_opt inst (reg * reg) 
+      (fun k inst =>
+        match inst with
+        | LLLd addr dst next =>
+          match get_load_addr aa addr with
+          | Some obj => 
+            match get_store_to rs k obj with
+            | Some src => Some (dst, src)
+            | None => None
+            end
           | None => None
           end
-        | None => None
+        | _ => None
         end
-      | _ => None
-      end
-    ) f.(fn_insts)).
+      ) f.(fn_insts)).
 
-Theorem src_dominates_dst:
-  forall (f: func) (stores: reaching_stores) (aa: points_to_set) (loads: list (reg * reg)),
-    loads = get_propagated_loads f stores aa ->
-    forall (src: reg) (dst: reg),
-      In (dst, src) loads -> Dominates f dst src.
-Proof.
-  intros f stores aa loads.
-  intros Hdef.
-  intros src dst.
-  intros Helem.
-  rewrite Hdef in Helem.
-  unfold get_propagated_loads in Helem.
-  
-  
+  Lemma propagate_src_dst:
+    forall (dst: reg) (src: reg),
+      In (dst, src) get_propagated_loads ->
+        exists (k: node) (addr: reg) (object: positive) (offset: positive),
+          loads_from f aa k dst addr object offset /\
+          store_to_at rs k src object offset.
+  Proof.
+    intros src dst.
+    intros Helem.
+    unfold get_propagated_loads in Helem.
+    apply PTrie.values_correct in Helem.
+    destruct Helem as [k Helem].
+    exists k.
+    apply PTrie.map_opt_correct in Helem.
+    destruct Helem as [inst].
+    destruct H as [Hinst Hfunc].
+    destruct inst; inversion Hfunc; clear H0.
+    destruct (get_load_addr aa addr) eqn:Hload; inversion Hfunc; clear H0.
+    destruct (get_store_to rs k o) eqn:Hstore; inversion Hfunc; clear H0.
+    destruct o as [object offset].
+    exists addr.
+    exists object.
+    exists offset.
+    inversion Hfunc.
+    rewrite <- H0 in Hfunc. rewrite <- H0. rewrite <- H0 in Hinst. clear H0. clear dst0.
+    rewrite <- H2. rewrite <- H2 in Hstore. clear H1. clear H2. clear Hfunc. clear r.
+    split.
+    - apply load with (next := next). symmetry. apply Hload. apply Hinst.
+    - apply store. symmetry. apply Hstore.
+  Qed.
+
+  Lemma src_dominates_dst:
+    is_valid f ->
+      forall (src: reg) (dst: reg),
+        In (dst, src) get_propagated_loads -> 
+          forall (def: node) (use: node),
+            DefinedAt f def src ->
+            UsedAt f use dst ->
+            Dominates f def use.
+  Proof.
+    intros Hvalid.
+    intros src dst.
+    intros Helem.
+    apply propagate_src_dst in Helem.
+    destruct Helem as [k Helem].
+    destruct Helem as [ld_addr Helem].
+    destruct Helem as [object Helem].
+    destruct Helem as [offset Helem].
+    destruct Helem as [Hload Hstore].
+    assert (Hstore': store_to_at rs k src object offset). { apply Hstore. }
+    apply (reaching_store_origin f aa) in Hstore'.
+    destruct Hstore' as [store Hstore'].
+    destruct Hstore' as [val Hstore'].
+    destruct Hstore' as [next Hstore'].
+    destruct Hstore' as [Hstore' Hdom].
+    inversion Hstore'.
+    assert (Hvalid': is_valid f). { apply Hvalid. }
+    destruct Hvalid' as [Hdef_dom_uses Hdefs_unique].
+    intros def use.
+    intros Hdef_src.
+    intros Huse_dst.
+    apply (dom_trans f def store use).
+    {
+      generalize (Hdef_dom_uses store).
+      intros H'.
+      assert (Hst_uses_src: Uses (LLSt addr src next) src).
+      { unfold Uses. right. reflexivity. }
+      destruct ((fn_insts f) ! def) eqn:E.
+      {
+        symmetry in E.
+        generalize (H' (LLSt addr src next0) src H Hst_uses_src def i E).
+        intros H''.
+        apply H''.
+        unfold DefinedAt in Hdef_src.
+        rewrite <- E in Hdef_src.
+        apply Hdef_src.
+      }
+      {
+        unfold DefinedAt in Hdef_src.
+        rewrite E in Hdef_src.
+        inversion Hdef_src.
+      }
+    }
+    {
+      apply (dom_trans f store k use).
+      {
+        inversion Hstore.
+        inversion Hstore'.
+        unfold get_store_to in H5.
+        destruct (rs ! k) as [use'|] eqn:Euse'; inversion H5.
+        destruct (use' ! object) as [object'|] eqn:Eobject'; inversion H5.
+        destruct (object' ! offset) as [offset'|] eqn:Eoffset'; inversion H5.
+        inversion H5. rewrite <- H5 in Eoffset'.
+        apply (reaching_stores_dom f aa rs k use' object object' offset src); try symmetry.
+        - apply Euse'.
+        - apply Eobject'.
+        - apply Eoffset'.
+        - apply (store_at f aa store object offset src addr0 next1).
+          + apply H10.
+          + apply H11.
+      }
+      {
+        inversion Hload.
+        destruct (f.(fn_insts) ! use) eqn:Euse.
+        + apply defs_dominate_uses with 
+            (def_inst := LLLd ld_addr dst next1)
+            (use_inst := i)
+            (r := dst).
+          - apply Hvalid.
+          - apply H6.
+          - unfold Defs. reflexivity.
+          - symmetry. apply Euse.
+          - unfold UsedAt in Huse_dst.
+            rewrite Euse in Huse_dst.
+            apply Huse_dst.
+        + unfold UsedAt in Huse_dst.
+          rewrite Euse in Huse_dst.
+          inversion Huse_dst.
+      }
+    }
+  Qed.
+End PROPAGATION.
 
 Definition propagate_store_to_load (f: func): func :=
   let aa := local_pta f in
-  let stores := analyse_reaching_stores f aa in
-  let loads := get_propagated_loads f stores aa in
+  let rs := analyse_reaching_stores f aa in
+  let loads := get_propagated_loads f rs aa in
   mkfunc f.(fn_args) f.(fn_stack) f.(fn_insts) f.(fn_phis) f.(fn_entry).
 
-Theorem propagate_store_to_load_validity:
-  forall (f: func),
-    is_valid f -> is_valid (propagate_store_to_load f).
-Proof.
-Qed.
-
-Theorem store_to_load_propagation :
-  forall
-    (p: prog) (p': prog)
-    (f: func) (f': func)
-    (s: state) (s': state)
-    (pc_st: node) (pc_ld: node)
-    (st_addr: reg) (st_val: reg) (st_next: node)
-    (ld_addr: reg) (ld_dst: reg) (ld_next: node)
-    (pts: points_to_set)
-    (object: positive) (offset: positive)
-    (id: name),
-    Some f =  p ! id /\ Some f' = p' ! id
-    /\
-    Some (LLSt st_addr st_val st_next) = f.(fn_insts) ! pc_st
-    /\
-    Some (LLLd ld_addr ld_dst ld_next) = f.(fn_insts) ! pc_ld
-    /\
-    Some f' = rewrite f ld_dst st_val
-    /\
-    pts = local_pta f
-    /\
-    Some [PTOffset object offset] = pts ! ld_addr
-  ->
-    True
-  .
-Admitted.
