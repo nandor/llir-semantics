@@ -29,7 +29,7 @@ Section VALIDITY.
       Some def_inst = PTrie.get f.(fn_insts) def ->
       Defs def_inst r ->
       forall (other: inst) (n: node),
-        Some other = f.(fn_insts) ! n /\ Defs other r -> other = def_inst.
+        Some other = PTrie.get f.(fn_insts) n /\ Defs other r -> n = def /\ other = def_inst.
 
   Definition is_valid := uses_have_defs /\ defs_are_unique.
 
