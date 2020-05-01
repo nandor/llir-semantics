@@ -3,7 +3,6 @@
 (* (C) 2020 Nandor Licker. All rights reserved. *)
 
 Require Import Coq.ZArith.ZArith.
-Require Import Coq.NArith.NArith.
 Require Import Coq.Lists.List.
 
 Require Import LLIR.Aliasing.
@@ -14,11 +13,14 @@ Require Import LLIR.Values.
 Require Import LLIR.Verify.
 Require Import LLIR.ReachingStores.
 Require Import LLIR.Dom.
+Require Import LLIR.Transform.
 
 Import ListNotations.
 
-Definition propagate_loads (f: func) (rs: reaching_stores) (aa: points_to_set): list (reg * reg) :=
-  PTrie.values (reg * reg) (PTrie.map_opt inst (reg * reg) 
+
+
+Definition find_load_reg (insts: inst_map) (rs: reaching_stores) (aa: points_to_set): PTrie.t reg :=
+  PTrie.extract reg (PTrie.map_opt inst (reg * reg) 
     (fun k inst =>
       match inst with
       | LLLd addr dst next =>
@@ -32,108 +34,32 @@ Definition propagate_loads (f: func) (rs: reaching_stores) (aa: points_to_set): 
         end
       | _ => None
       end
-    ) f.(fn_insts)).
+    ) insts).
 
-Fixpoint closure_chain (src: reg) (pairs: list (reg * reg)): (option reg * list (reg * reg)) :=
-  match pairs with
-  | nil => (None, nil)
-  | (dst', src') :: pairs' =>
-    match dst' =? src with
-    | true => (Some src', pairs')
-    | false => 
-      match closure_chain src pairs' with
-      | (None, pairs'') => (None, nil)
-      | (v, pairs'') => (v, (dst', src') :: pairs'')
-      end
-    end
+Definition rewrite_reg (loads: PTrie.t reg) (r: reg): reg :=
+  match PTrie.get loads r with
+  | None => r
+  | Some reg' => reg'
   end.
 
-Theorem closure_chain_length:
-  forall (pairs: list (reg * reg)) (src: reg) (p: reg * reg),
-    Nat.lt (length (snd (closure_chain src (p::pairs)))) (S (length pairs)).
-Proof.
-  induction pairs; try intros.
-  { 
-    unfold closure_chain.
-    destruct p.
-    destruct (r =? src); simpl; apply Nat.lt_0_1.
-  }
-  {
-    simpl.
-    destruct p.
-    destruct (r =? src); try apply Nat.lt_succ_diag_r.
-    destruct a.
-    destruct (r1 =? src) eqn:E; try apply Nat.lt_succ_diag_r.
-    destruct (closure_chain src pairs) eqn:Hc.
-    destruct o.
-    + simpl.
-      rewrite <- Nat.succ_lt_mono.
-      generalize (IHpairs src (r1, r1)).
-      unfold closure_chain.
-      rewrite E.
-      fold closure_chain.
-      intro H.
-      rewrite Hc in H.
-      simpl in H.
-      apply H.
-    + simpl.
-      apply Nat.lt_0_succ.
-  }
-Qed.
 
-Program Fixpoint closure_step (src: reg) (pairs: list (reg * reg)) { measure (length pairs) } :=
-  match closure_chain src pairs with
-  | (None, _) => src
-  | (Some v, pairs') => closure_step v pairs'
-  end.
-Obligation 1.
-  rename Heq_anonymous into Heq.
-  unfold closure_chain in Heq.
-  destruct pairs.
-  - inversion Heq.
-  - destruct p as [x y].
-    destruct (x =? src) eqn:Ex.
-    {
-      inversion Heq.
-      simpl.
-      apply Nat.lt_succ_r.
-      reflexivity.
-    }
-    {
-      fold closure_chain in Heq.
-      simpl.
-      destruct (closure_chain src pairs) eqn:E.
-      destruct o.
-      - inversion Heq.
-        assert ((x, y) :: l = snd (closure_chain src ((x, y) :: pairs))).
-        {
-          simpl.
-          rewrite Ex.
-          rewrite E.
-          simpl.
-          reflexivity.
-        }
-        rewrite H.
-        apply closure_chain_length.
-      - inversion Heq.
-    }
-Qed.
+Definition rewrite_inst (i: inst) (loads: PTrie.t reg): inst :=
+  rewrite_uses i (rewrite_reg loads).
 
-Definition closure (pairs: list (reg * reg)): list (reg * reg) :=
-  List.map 
-    (fun pair =>
-      match pair with
-      | (dst, src) => (dst, closure_step src pairs)
-      end)
-    pairs.
+
+Definition rewrite_insts (insts: inst_map) (loads: PTrie.t reg): inst_map :=
+  PTrie.map inst inst (fun k inst => rewrite_inst inst loads) insts.
+
 
 Definition propagate_store_to_load (f: func): func :=
   let aa := local_pta f in
   let rs := analyse_reaching_stores f aa in
-  let loads := closure (propagate_loads f rs aa) in
-  mkfunc f.(fn_args) f.(fn_stack) f.(fn_insts) f.(fn_phis) f.(fn_entry).
+  let loads := find_load_reg f.(fn_insts) rs aa in
+  let fn_insts := rewrite_insts f.(fn_insts) loads in
+  mkfunc f.(fn_args) f.(fn_stack) fn_insts f.(fn_phis) f.(fn_entry).
 
-Section PROPERTIES.
+
+Section LOAD_PROPERTIES.
   Variable f: func.
   Variable rs: reaching_stores.
   Variable aa: points_to_set.
@@ -141,18 +67,18 @@ Section PROPERTIES.
   Hypothesis H_f_valid: is_valid f.
 
   Lemma propagate_src_dst:
-    forall (loads: list (reg * reg)) (dst: reg) (src: reg),
-      loads = propagate_loads f rs aa ->
-      In (dst, src) loads ->
+    forall (loads: PTrie.t reg) (dst: reg) (src: reg),
+      loads = find_load_reg f.(fn_insts) rs aa ->
+      Some src = PTrie.get loads dst ->
         exists (k: node) (addr: reg) (object: positive) (offset: positive),
           loads_from f aa k dst addr object offset /\
-          store_to_at rs k src object offset.
+          store_reaches rs k src object offset.
   Proof.
     intros loads src dst.
     intro Hprop.
     intro Helem.
     rewrite Hprop in Helem.
-    apply PTrie.values_correct in Helem.
+    apply PTrie.extract_correct in Helem.
     destruct Helem as [k Helem].
     exists k.
     apply PTrie.map_opt_correct in Helem.
@@ -177,12 +103,13 @@ Section PROPERTIES.
     forall (def: node) (use: node),
       DefinedAt f def src ->
       UsedAt f use dst ->
-      Dominates f def use.
+      StrictlyDominates f def use.
 
   Lemma src_dominates_dst:
-    forall (loads: list (reg * reg)) (src: reg) (dst: reg),
-      loads = propagate_loads f rs aa ->
-      In (dst, src) loads -> reg_dom src dst.
+    forall (loads: PTrie.t reg) (src: reg) (dst: reg),
+      loads = find_load_reg f.(fn_insts) rs aa ->
+      Some src = PTrie.get loads dst -> 
+      reg_dom src dst.
   Proof.
     intros loads src dst.
     intro Hprop.
@@ -193,7 +120,7 @@ Section PROPERTIES.
     destruct Helem as [object Helem].
     destruct Helem as [offset Helem].
     destruct Helem as [Hload Hstore].
-    assert (Hstore': store_to_at rs k src object offset).
+    assert (Hstore': store_reaches rs k src object offset).
     { apply Hstore. }
     apply (reaching_store_origin f aa) in Hstore'.
     destruct Hstore' as [store Hstore'].
@@ -202,25 +129,27 @@ Section PROPERTIES.
     destruct Hstore' as [Hstore' Hdom].
     inversion Hstore'.
     assert (H_f_valid': is_valid f). { apply H_f_valid. }
-    destruct H_f_valid' as [Hdef_dom_uses Hdefs_unique].
+    destruct H_f_valid' as [Hdef_dom_uses [Hdefs_unique _]].
+    unfold defs_are_unique in Hdefs_unique.
     intros def use.
     intros Hdef_src.
     intros Huse_dst.
-    apply (dom_trans f def store use).
+    apply (sdom_trans f def store use).
     {
       generalize (Hdef_dom_uses store).
       intros H'.
-      assert (Hst_uses_src: Uses (LLSt addr src next) src).
-      { unfold Uses. right. reflexivity. }
+      assert (Hsrc_used_at_store: UsedAt f store src).
+      { unfold UsedAt. rewrite <- H. unfold Uses. auto. }
       destruct ((fn_insts f) ! def) eqn:E.
       {
         symmetry in E.
-        generalize (H' (LLSt addr src next0) src H Hst_uses_src def i E).
+        generalize (H' src Hsrc_used_at_store).
         intros H''.
-        apply H''.
-        unfold DefinedAt in Hdef_src.
-        rewrite <- E in Hdef_src.
-        apply Hdef_src.
+        destruct H'' as [def' [Hdef' Hdom']].
+        assert (def = def').
+        { apply Hdefs_unique with (r := src). apply Hdef'. apply Hdef_src. }
+        subst.
+        apply Hdom'.
       }
       {
         unfold DefinedAt in Hdef_src.
@@ -229,7 +158,7 @@ Section PROPERTIES.
       }
     }
     {
-      apply (dom_trans f store k use).
+      apply (sdom_trans f store k use).
       {
         inversion Hstore.
         inversion Hstore'.
@@ -238,7 +167,8 @@ Section PROPERTIES.
         destruct (use' ! object) as [object'|] eqn:Eobject'; inversion H5.
         destruct (object' ! offset) as [offset'|] eqn:Eoffset'; inversion H5.
         inversion H5. rewrite <- H5 in Eoffset'.
-        apply (reaching_stores_dom f aa rs k use' object object' offset src); try symmetry.
+        apply (reaching_stores_dom f aa rs k use' object object' offset src); 
+          try symmetry.
         - apply Euse'.
         - apply Eobject'.
         - apply Eoffset'.
@@ -248,18 +178,18 @@ Section PROPERTIES.
       }
       {
         inversion Hload.
+        unfold uses_have_defs in Hdef_dom_uses.
+        subst.
+        assert (HdefK: DefinedAt f k dst). 
+        { unfold DefinedAt. rewrite <- H6. unfold Defs. reflexivity. }
         destruct (f.(fn_insts) ! use) eqn:Euse.
-        + apply defs_dominate_uses with 
-            (def_inst := LLLd ld_addr dst next1)
-            (use_inst := i)
-            (r := dst).
-          - apply H_f_valid.
-          - apply H6.
-          - unfold Defs. reflexivity.
-          - symmetry. apply Euse.
-          - unfold UsedAt in Huse_dst.
-            rewrite Euse in Huse_dst.
-            apply Huse_dst.
+        + generalize (Hdef_dom_uses use dst Huse_dst).
+          intros H''.
+          destruct H'' as [def' [Hdef' Hdom']].
+          assert (def' = k).
+          { apply Hdefs_unique with (r := dst).  apply HdefK. apply Hdef'. }
+          subst.
+          apply Hdom'.
         + unfold UsedAt in Huse_dst.
           rewrite Euse in Huse_dst.
           inversion Huse_dst.
@@ -268,10 +198,10 @@ Section PROPERTIES.
   Qed.
 
   Lemma propagate_load_unique:
-    forall (loads: list (reg * reg)) (dst: reg) (src: reg),
-      loads = propagate_loads f rs aa ->
-      In (dst, src) loads ->
-        forall (src': reg), In (dst, src') loads -> src = src'.
+    forall (loads: PTrie.t reg) (dst: reg) (src: reg),
+      loads = find_load_reg f.(fn_insts) rs aa ->
+      Some src = PTrie.get loads dst ->
+        forall (src': reg), Some src' = PTrie.get loads dst -> src = src'.
   Proof.
     intros loads  dst src.
     intro Hloads.
@@ -287,17 +217,18 @@ Section PROPERTIES.
     inversion Hload.
     assert (Hdef: Defs (LLLd addr dst next) dst). reflexivity.
     destruct H_f_valid as [_ Hunique].
+    destruct Hunique as [Hunique _].
+    unfold defs_are_unique in Hunique.
     inversion Hload'.
-    generalize (Hunique k' (LLLd addr' dst next0) dst H7 Hdef (LLLd addr dst next) k).
-    intro Huniq.
-    assert (Heq: k = k' /\ LLLd addr dst next = LLLd addr' dst next0).
-    {
-      apply Huniq.
-      split.
-      - apply H0.
-      - simpl. reflexivity.
+    generalize (Hunique k' k dst). intro Huniq.
+    assert (Hkk: k = k').
+    { 
+      apply Huniq; unfold DefinedAt.
+      - rewrite <- H7. unfold Defs. auto.
+      - rewrite <- H0. unfold Defs. auto.
     }
-    destruct Heq as [Hk_eq Hld_eq].
+    assert (Hld_eq: LLLd addr dst next = LLLd addr' dst next0).
+    { subst. rewrite <- H0 in H7. inversion H7. trivial. }
     inversion Hld_eq as [Haddr].
     rewrite <- Haddr in H6.
     rewrite <- H6 in H.
@@ -306,11 +237,192 @@ Section PROPERTIES.
     rewrite <- H16 in Hstore'.
     inversion Hstore.
     inversion Hstore'.
-    rewrite <- Hk_eq in H21.
+    subst.
     rewrite <- H14 in H21.
     inversion H21.
     reflexivity.
   Qed.
-End PROPERTIES.
+
+  Lemma propagate_load_no_refl:
+    forall (loads: PTrie.t reg) (dst: reg) (src: reg),
+      loads = find_load_reg f.(fn_insts) rs aa ->
+      Some src = PTrie.get loads dst -> 
+      src <> dst.
+  Proof.
+    intros loads dst src.
+    intros Hloads.
+    intros Hin.
+    apply propagate_src_dst in Hin; try apply Hloads.
+    intro contra. subst.
+    destruct Hin as [k [addr [object [offset [Hload Hstore]]]]].
+    inversion Hload.
+    inversion Hstore.
+    subst.
+    apply (reaching_store_origin f aa) in Hstore.
+    destruct Hstore as [orig [_ [_ [Hstore dom]]]].
+    inversion Hstore.
+    subst.
+    assert (Huse: Uses (LLSt addr0 dst next0) dst). unfold Uses. auto.
+    destruct H_f_valid as [Huses_have_defs [Hdefs_are_unique _]].
+    unfold uses_have_defs in Huses_have_defs.
+    unfold defs_are_unique in Hdefs_are_unique.
+    assert (Huse_dst: UsedAt f orig dst). 
+    { unfold UsedAt. rewrite <- H1. unfold Uses. auto. }
+    generalize (Huses_have_defs orig dst Huse_dst).
+    intros Hdef_exists.
+    destruct Hdef_exists as [def [Hdef Hdom]].
+    clear Huses_have_defs.
+    assert (Hkdef: k = def).
+    { 
+      apply Hdefs_are_unique with (r := dst). 
+      - apply Hdef.
+      - unfold DefinedAt. rewrite <- H0. unfold Defs. auto.
+    }
+    subst.
+    inversion Hdom.
+    inversion dom.
+    generalize (dom_antisym f orig def DOM0 DOM).
+    intros eq. apply STRICT in eq. inversion eq.
+  Qed.
+
+  Lemma propagate_use_origin:
+    forall (loads: PTrie.t reg) (user: inst) (user': inst) (r: reg),
+      loads = find_load_reg f.(fn_insts) rs aa ->
+      user' = rewrite_inst user loads ->
+      Uses user r ->
+      (
+        (PTrie.get loads r = None /\ Uses user' r)
+        \/
+        (exists (r': reg), PTrie.get loads r = Some r' /\ Uses user' r')
+      ).
+  Proof.
+    intros loads user user' r Hloads Huser' Huses.
+    unfold rewrite_inst in Huser'.
+    unfold rewrite_uses in Huser'.
+    unfold rewrite_reg in Huser'.
+    destruct (PTrie.get loads r) eqn:Eload.
+    {
+      right.
+      exists r0.
+      split; auto.
+      destruct user; inversion Huses;
+        subst;
+        try rewrite Eload;
+        unfold Uses;
+        try reflexivity.
+      + left. reflexivity.
+      + right. reflexivity.
+      + left. reflexivity.
+      + unfold Uses in Huses.
+        destruct Huses.
+        - left. subst. rewrite Eload. reflexivity.
+        - right.
+          apply in_map_iff.
+          exists r.
+          split.
+          rewrite Eload. reflexivity.
+          apply H.
+      + left. reflexivity.
+      + right. reflexivity.
+    }
+    {
+      left.
+      split; try reflexivity.
+      destruct user; destruct Huses;
+        unfold Uses;
+        rewrite Huser';
+        try rewrite H;
+        try rewrite Eload;
+        auto.
+      right.
+      apply in_map_iff.
+      exists r.
+      rewrite Eload.
+      split. reflexivity. apply H.
+    }
+  Qed.
+
+  Lemma propagate_use_inversion:
+    forall (loads: PTrie.t reg) (user: inst) (user': inst) (r: reg),
+      loads = find_load_reg f.(fn_insts) rs aa ->
+      user' = rewrite_inst user loads ->
+      Uses user' r ->
+      (
+        (PTrie.get loads r = None /\ Uses user r)
+        \/
+        (exists (r': reg), PTrie.get loads r' = Some r /\ Uses user r')
+      ).
+  Proof.
+    intros loads user user' r Hloads Huser' Huses.
+    rewrite Huser' in Huses.
+    unfold rewrite_inst in Huses.
+    unfold rewrite_uses in Huses.
+    unfold rewrite_reg in Huses.
+    unfold rewrite_inst in Huser'.
+    unfold rewrite_uses in Huser'.
+    unfold rewrite_reg in Huser'.
+    unfold Uses in Huses.
+    unfold Uses.
+    destruct user eqn:Euser; destruct Huses;
+      repeat match goal with
+      | [ |- context [loads ! ?reg] ] => 
+        destruct (loads ! reg) eqn:?reg
+      | [ H: _ ! ?reg = Some ?v |- context [ _ ! _ = Some ?v ] ] => 
+        right; exists reg; auto
+      | [ H: _ = ?r |- context [ Some ?r ] ] => 
+        rewrite <- H
+      | [ H0: ?loads ! ?reg = None, H1: ?loads ! ?reg = Some _ |- _ ] =>
+        rewrite H0 in H1; inversion H1
+      | [ |- _ ] =>
+        subst; auto
+      end.
+    - right.
+      apply in_map_iff in H.
+      destruct H as [x [Hr Hin]].
+      remember (find_load_reg (fn_insts f) rs aa) as loads.
+      destruct (Pos.eq_dec r x).
+      { 
+        destruct (loads ! x) eqn:E.
+        { 
+          generalize (propagate_load_no_refl loads x x).
+          intros Hrefl. 
+          apply Hrefl in Heqloads.
+          - contradiction Heqloads. reflexivity.
+          - symmetry. subst. apply E.
+        }
+        {
+          subst. rewrite E in r0. inversion r0.
+        }
+      }
+      { 
+        destruct (loads ! x) eqn:E; subst.
+        * exists x. split. apply E. right. apply Hin.
+        * rewrite E in r0. inversion r0.
+      }
+    - apply in_map_iff in H.
+      destruct H as [x [Hr Hin]].
+      remember (find_load_reg (fn_insts f) rs aa) as loads.
+      destruct (Pos.eq_dec r x).
+      {
+        left. rewrite e. auto.
+      }
+      {
+        destruct (loads ! x) eqn:E.
+        {
+          subst. right. exists x. 
+          split. apply E. right. apply Hin.
+        }
+        {
+          subst. left. split; auto.
+        }
+      }
+  Qed.
+
+End LOAD_PROPERTIES.
+
+Section PROPAGATE_PROPERTIES.
+  Variable f: func.
+  Hypothesis H_f_valid: is_valid f.
+End PROPAGATE_PROPERTIES.
 
 

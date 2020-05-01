@@ -16,6 +16,7 @@ PROOFS=\
 	Maps.vo\
 	State.vo\
 	LLIR.vo\
+	Transform.vo\
 	Dom.vo\
 	Eval.vo\
 	Aliasing.vo\

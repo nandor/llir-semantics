@@ -16,41 +16,40 @@ Section VALIDITY.
   Variable f: func.
 
   Definition uses_have_defs :=
-    forall (use: node) (use_inst: inst) (r: reg),
-      Some use_inst = PTrie.get f.(fn_insts) use ->
-      Uses use_inst r ->
-      forall (def: node) (def_inst: inst),
-        Some def_inst = PTrie.get f.(fn_insts) def ->
-        Defs def_inst r ->
-        Dominates f def use.
+    forall (use: node) (r: reg),
+      UsedAt f use r ->
+      exists (def: node),
+        DefinedAt f def r /\
+        StrictlyDominates f def use.
 
   Definition defs_are_unique :=
-    forall (def: node) (def_inst: inst) (r: reg),
-      Some def_inst = PTrie.get f.(fn_insts) def ->
-      Defs def_inst r ->
-      forall (other: inst) (n: node),
-        Some other = PTrie.get f.(fn_insts) n /\ Defs other r -> n = def /\ other = def_inst.
+    forall (def: node) (def': node) (r: reg),
+      DefinedAt f def r ->
+      DefinedAt f def' r ->
+      def' = def.
 
-  Definition is_valid := uses_have_defs /\ defs_are_unique.
+  Definition well_ordered :=
+    forall (def: node) (use: node),
+      StrictlyDominates f def use -> Pos.lt def use.
+
+  Definition is_valid := uses_have_defs /\ defs_are_unique /\ well_ordered.
 
   Theorem defs_dominate_uses:
     is_valid ->
-    forall (def: node) (def_inst: inst) (use: node) (use_inst: inst) (r: reg),
-      Some def_inst = PTrie.get f.(fn_insts) def ->
-      Defs def_inst r ->
-      Some use_inst = PTrie.get f.(fn_insts) use ->
-      Uses use_inst r ->
-      Dominates f def use.
+    forall (def: node) (use: node) (r: reg),
+      DefinedAt f def r ->
+      UsedAt f use r ->
+      StrictlyDominates f def use.
   Proof.
-    intros Hvalid def def_inst use use_inst r.
-    destruct Hvalid as [Huses_have_defs Hdefs_are_unique].
-    intros Hdef_inst.
+    intros Hvalid def use r.
+    destruct Hvalid as [Huses_have_defs [Hdefs_are_unique _]].
     intros Hdef.
-    intros Huse_inst.
     intros Huse.
     unfold uses_have_defs in Huses_have_defs.
-    generalize (Huses_have_defs use use_inst r Huse_inst Huse).
+    generalize (Huses_have_defs use r Huse).
     intros Hdom.
-    apply (Hdom def def_inst). apply Hdef_inst. apply Hdef.
+    destruct Hdom as [dom [Hdef' Hdom]].
+    generalize (Hdefs_are_unique def dom r Hdef Hdef').
+    intros Heq. subst. auto.
   Qed.
 End VALIDITY.

@@ -319,11 +319,11 @@ Section ANALYSIS.
             stored_at n object offset val
       .
 
-    Inductive store_to_at: node -> reg -> positive -> positive -> Prop :=
+    Inductive store_reaches: node -> reg -> positive -> positive -> Prop :=
       | store:
         forall (k: node) (val: reg) (object: positive) (offset: positive),
           Some val = get_store_to k (object, offset) -> 
-          store_to_at k val object offset
+          store_reaches k val object offset
       .
   End UTILITIES.
 
@@ -340,16 +340,16 @@ Section ANALYSIS.
         Some object' = PTrie.get objects object ->
         Some write = PTrie.get object' offset ->
         stored_at aa def object offset write ->
-        Dominates f def use.
+        StrictlyDominates f def use.
     Admitted.
 
     Theorem reaching_store_origin:
       forall (reach: node) (val: reg) (object: positive) (offset: positive),
-        store_to_at rs reach val object offset ->
+        store_reaches rs reach val object offset ->
           exists (orig: node) (addr: reg) (next: node),
             stored_at aa orig object offset val
             /\
-            Dominates f orig reach
+            StrictlyDominates f orig reach
             .
     Admitted.
   End PROPERTIES.

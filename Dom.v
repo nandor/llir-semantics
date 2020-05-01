@@ -140,10 +140,11 @@ Section FUNCTION.
       forall (n: node),
         Dominates n n
     | dom_path:
-      forall (a: node) (b:node)
+      forall (a: node) (b: node)
         (PATH: forall (p: list node), Path entry p b -> In a p)
         (REACH: Reachable a),
-        Dominates a b.
+        Dominates a b
+    .
 
   Theorem entry_dominates_all:
     forall (n: node),
@@ -200,4 +201,26 @@ Section FUNCTION.
     forall (n: node) (m: node) (p: node),
       Dominates n m -> Dominates m p -> Dominates n p.
   Admitted.
+
+  Inductive StrictlyDominates: node -> node -> Prop :=
+    | sdom_path:
+        forall (a: node) (b: node)
+          (DOM: Dominates a b)
+          (STRICT: a <> b),
+          StrictlyDominates a b
+    .
+
+  Theorem sdom_trans:
+    forall (n: node) (m: node) (p: node),
+      StrictlyDominates n m -> StrictlyDominates m p -> StrictlyDominates n p.
+  Proof.
+    intros n m p Hnm Hmp.
+    inversion Hnm.
+    inversion Hmp.
+    constructor. 
+    apply (dom_trans n m p); auto.
+    intro contra. subst.
+    assert (Heq: m = p). { apply (dom_antisym p m); auto. }
+    auto.
+  Qed.
 End FUNCTION.

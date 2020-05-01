@@ -51,6 +51,10 @@ Module Type PARTIAL_MAP.
     forall (V: Type),
       t V -> list V.
 
+  Parameter extract:
+    forall (V: Type),
+      t (key * V) -> t V.
+
   Parameter eqb: forall (V: Type), (V -> V -> bool) -> t V -> t V -> bool.
 
 End PARTIAL_MAP.
@@ -150,6 +154,18 @@ Module PTrie <: PARTIAL_MAP.
     Variable f: key -> A -> B.
 
     Definition map (a: t A): t B := map_opt A B (fun k a => Some (f k a)) a.
+
+    Theorem map_correct :
+      forall (t: t A) (k: key) (b: B),
+        Some b = get B (map t) k -> exists (a: A), Some a = get A t k /\ b = f k a.
+    Proof.
+      intros t k b.
+      intros Hmapped.
+      apply map_opt_correct in Hmapped.
+      destruct Hmapped as [a [Hget Hf]].
+      exists a.
+      split. apply Hget. inversion Hf. auto.
+    Qed.
   End MAP.
 
   Fixpoint fold_helper (A: Type) (B: Type) (f: B -> key -> A -> B) (key: key) (t: t A) (v: B) : B :=
@@ -211,6 +227,24 @@ Module PTrie <: PARTIAL_MAP.
       apply Hin.
     Qed.
   End VALUES.
+
+  Section EXTRACT.
+    Variable V: Type.
+
+    Definition extract (t: t (key * V)) :=
+      fold (key * V) (PTrie.t V)
+        (fun tree _ v =>
+          match v with
+          | (k, v') => set V tree k v'
+          end)
+        t
+        (PTrie.empty V).
+
+    Theorem extract_correct:
+      forall (e: t (key *  V)) (k: key) (v: V),
+        Some v = get V (extract e) k -> exists k', Some (k, v) = get (key * V) e k'.
+    Admitted.
+  End EXTRACT.
 
   Section COMBINE.
     Variables A B C: Type.
@@ -553,6 +587,40 @@ Module PTrie <: PARTIAL_MAP.
       }
     Qed.
   End BOOLEAN_EQUALITY.
+
+  Section DECIDABILITY.
+    Variable V: Type.
+
+    Hypothesis eq_decV: 
+      forall (a: V) (b: V),
+        {a = b} + {a <> b}.
+
+    Fixpoint Elem (e: V) (l: t V): Prop :=
+      match l with
+      | Leaf => False
+      | Node l None r => Elem e l \/ Elem e r
+      | Node l (Some v) r => e = v \/ Elem e l \/ Elem e r
+      end.
+
+    Theorem elem_dec:
+      forall (trie: t V) (e: V) , {Elem e trie} + {~Elem e trie}.
+    Proof.
+      induction trie.
+      + intro e. auto.
+      + intro e.
+        generalize (IHtrie1 e).
+        generalize (IHtrie2 e).
+        intros H2 H1.
+        destruct o.
+        destruct (eq_decV e v); simpl; auto.
+        - destruct H1; destruct H2; simpl; auto.
+          right. unfold not. intros H.
+          repeat destruct H; auto.
+        - destruct H1; destruct H2; simpl; auto.
+          right. unfold not. intros H.
+          destruct H; auto.
+    Qed.
+  End DECIDABILITY.
 End PTrie.
 
 
