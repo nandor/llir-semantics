@@ -155,7 +155,7 @@ Module PTrie <: PARTIAL_MAP.
 
     Definition map (a: t A): t B := map_opt A B (fun k a => Some (f k a)) a.
 
-    Theorem map_correct :
+    Theorem map_in :
       forall (t: t A) (k: key) (b: B),
         Some b = get B (map t) k -> exists (a: A), Some a = get A t k /\ b = f k a.
     Proof.
@@ -166,6 +166,11 @@ Module PTrie <: PARTIAL_MAP.
       exists a.
       split. apply Hget. inversion Hf. auto.
     Qed.
+
+    Theorem map_get :
+      forall (t: t A) (k: key),
+        get B (map t) k = option_map (f k) (get A t k).
+    Admitted.
   End MAP.
 
   Fixpoint fold_helper (A: Type) (B: Type) (f: B -> key -> A -> B) (key: key) (t: t A) (v: B) : B :=
