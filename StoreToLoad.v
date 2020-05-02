@@ -426,11 +426,56 @@ Section PROPAGATE_PROPERTIES.
   Variable f: func.
   Hypothesis H_f_valid: is_valid f.
 
+  Lemma preserves_succ:
+    forall (src: node) (dst: node),
+      Succ f src dst <-> 
+      Succ (propagate_store_to_load f) src dst.
+  Proof.
+    remember (local_pta f) as aa.
+    remember (analyse_reaching_stores f aa) as rs.
+    remember ((find_load_reg (fn_insts f) rs aa)) as loads.
+    intros src dst.
+    split.
+    {
+      intros Hsucc.
+      unfold propagate_store_to_load.
+      unfold rewrite_insts.
+      unfold rewrite_inst.
+      unfold Succ in *.
+      simpl.
+      rewrite PTrie.map_get.
+      destruct ((fn_insts f) ! src); try inversion Hsucc.
+      unfold rewrite_uses. simpl.
+      unfold SuccessorOfInst in *.
+      destruct i; subst; auto.
+    }
+    {
+      intros Hsucc.
+      unfold propagate_store_to_load in *.
+      unfold rewrite_insts in *.
+      unfold rewrite_inst in *.
+      unfold Succ in *.
+      simpl in Hsucc.
+      rewrite PTrie.map_get in Hsucc.
+      destruct ((fn_insts f) ! src); try inversion Hsucc.
+      simpl in Hsucc.
+      unfold SuccessorOfInst in *.
+      destruct i; subst; auto.
+    }
+  Qed.
+
   Lemma preserves_dom:
     forall (src: node) (dst: node),
       Dominates f src dst <-> 
       Dominates (propagate_store_to_load f) src dst.
-  Admitted.
+  Proof.
+    intros src dst.
+    split; 
+      intros Hdom;
+      apply (eq_cfg_dom f (propagate_store_to_load f));
+      try apply preserves_succ;
+      try apply Hdom.
+  Qed.
 
   Lemma preserves_sdom:
     forall (src: node) (dst: node),
@@ -441,8 +486,7 @@ Section PROPAGATE_PROPERTIES.
     split; 
       intro Hdom; inversion Hdom; 
       subst; 
-      apply sdom_path; try apply STRICT;
-       apply preserves_dom; apply DOM.
+      apply sdom_path; try apply STRICT; apply preserves_dom; apply DOM.
   Qed.
 
   Lemma preserves_defs:

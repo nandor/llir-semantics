@@ -16,13 +16,11 @@ Section FUNCTION.
 
   Definition entry: node := f.(fn_entry).
 
-  Inductive Succ: node -> node -> Prop :=
-    | succ_dir:
-      forall (from: node) (to: node) (i: inst),
-        Some i = PTrie.get f.(fn_insts) from ->
-        SuccessorOfInst i to ->
-        Succ from to
-    .
+  Definition Succ (from: node) (to: node) :=
+    match PTrie.get f.(fn_insts) from with
+    | Some i => SuccessorOfInst i to
+    | None => False
+    end.
 
   Inductive Closure (x: node): node -> Prop :=
     | closure_refl:
@@ -224,3 +222,12 @@ Section FUNCTION.
     auto.
   Qed.
 End FUNCTION.
+
+Lemma eq_cfg_dom:
+  forall (f: func) (f': func),
+    (forall (src: node) (dst: node), Succ f src dst <-> Succ f' src dst) ->
+    forall (src: node) (dst: node),
+      Dominates f src dst <-> 
+      Dominates f' src dst.
+Admitted.
+
