@@ -7,9 +7,9 @@ Require Import Coq.ZArith.ZArith.
 Require Import LLIR.Values.
 Require Import LLIR.Maps.
 
-Definition node := positive.
+Notation node := positive.
 
-Definition reg := positive.
+Notation reg := positive.
 
 
 

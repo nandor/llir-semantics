@@ -19,7 +19,7 @@ Module Reach.
   Definition t := PTrie.t (PTrie.t positive).
 
   Definition eq: t -> t -> Prop :=
-    PTrie.eq (PTrie.t positive) (PTrie.eq positive Pos.eq).
+    PTrie.eq (PTrie.eq Pos.eq).
 
   Theorem eq_refl:
     forall x,
@@ -27,9 +27,9 @@ Module Reach.
   Proof.
     intros x.
     unfold eq.
-    apply (PTrie.eq_refl (PTrie.t positive)).
+    apply PTrie.eq_refl.
     intros v.
-    apply (PTrie.eq_refl positive).
+    apply PTrie.eq_refl.
     intros v'.
     apply Pos.eq_refl.
   Qed.
@@ -39,9 +39,9 @@ Module Reach.
       eq x y -> eq y x.
   Proof.
     intros x y.
-    apply (PTrie.eq_sym (PTrie.t positive)).
+    apply PTrie.eq_sym.
     intros v1 v2.
-    apply (PTrie.eq_sym positive).
+    apply PTrie.eq_sym.
     intros v1' v2'.
     apply Pos.eq_sym.
   Qed.
@@ -51,9 +51,9 @@ Module Reach.
       eq x y -> eq y z -> eq x z.
   Proof.
     intros x y z.
-    apply (PTrie.eq_trans (PTrie.t positive)).
+    apply PTrie.eq_trans.
     intros v1 v2 v3.
-    apply (PTrie.eq_trans positive).
+    apply PTrie.eq_trans.
     intros v1' v2' v3'.
     apply Pos.eq_trans.
   Qed.
@@ -68,10 +68,10 @@ Module Reach.
     intros x y.
     intro H.
     unfold eq.
-    apply (PTrie.eqb_eq (PTrie.t positive) (PTrie.eqb Pos.eqb)).
+    apply (PTrie.eqb_eq (PTrie.eqb Pos.eqb)).
     - intros a b.
       intro H'.
-      apply (PTrie.eqb_eq positive Pos.eqb).
+      apply (PTrie.eqb_eq Pos.eqb).
       + intros a' b'.
         intro H''.
         apply Pos.eqb_eq in H''.
@@ -80,7 +80,7 @@ Module Reach.
         apply Pos.eq_refl.
       + apply H'.
     - intros v.
-      apply (PTrie.eq_refl positive).
+      apply PTrie.eq_refl.
       intros v'.
       apply Pos.eq_refl.
     - apply H.
@@ -180,7 +180,7 @@ Module Reach.
     reflexivity.
   Qed.
 
-  Definition top: t := PTrie.empty (PTrie.t positive).
+  Definition top: t := PTrie.empty.
 
   Theorem le_top:
     forall x,
@@ -194,7 +194,7 @@ Module Reach.
   Qed.
 
   Definition lub_offset (a: PTrie.t positive) (b: PTrie.t positive): PTrie.t positive :=
-    PTrie.combine positive positive positive
+    PTrie.combine
       (fun av bv =>
         match av, bv with
         | Some av', Some bv' => if av' =? bv' then Some av' else None
@@ -202,7 +202,7 @@ Module Reach.
         end) a b.
 
   Definition lub (a: t) (b: t): t :=
-    PTrie.combine (PTrie.t positive) (PTrie.t positive) (PTrie.t positive)
+    PTrie.combine
       (fun av bv =>
         match av, bv with
         | Some av', Some bv' => Some (lub_offset av' bv')
