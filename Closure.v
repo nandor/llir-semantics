@@ -187,15 +187,12 @@ Section CLOSURE.
     is_relation (closure loads).
   Proof.
     unfold closure.
-    apply (PTrie.fold_prop 
-      closure_helper 
-      loads
-      is_relation
-      (fun k v => Some v = loads ! k)
-      closure_helper_valid
-      {}
-      is_valid_empty
-    ).
+    apply PTrie.fold_prop with
+      (pE := fun k v => Some v = loads ! k).
+    + intros k a acc Hacc Hin.
+      apply closure_helper_valid. apply Hacc. apply Hin.
+    + apply is_valid_empty.
+    + intros k a Hin. apply Hin.
   Qed.
 
   Example chain_example :=

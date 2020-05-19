@@ -221,6 +221,15 @@ Section FUNCTION.
     assert (Heq: m = p). { apply (dom_antisym p m); auto. }
     auto.
   Qed.
+
+  Theorem sdom_irrefl:
+    forall (n: node), ~(StrictlyDominates n n).
+  Proof.
+    intros n contra.
+    inversion contra.
+    apply STRICT.
+    reflexivity.
+  Qed.
 End FUNCTION.
 
 Lemma eq_cfg_dom:

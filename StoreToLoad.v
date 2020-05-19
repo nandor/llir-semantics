@@ -81,7 +81,7 @@ Section LOAD_PROPERTIES.
 
   Lemma propagate_src_dst:
     forall (dst: reg) (src: reg),
-      Some src = PTrie.get loads dst ->
+      Some src = loads ! dst ->
         exists (k: node) (addr: reg) (object: positive) (offset: positive),
           loads_from f aa k dst addr object offset /\
           store_reaches rs k src object offset.
@@ -107,13 +107,63 @@ Section LOAD_PROPERTIES.
     - apply store. symmetry. subst. apply Hstore.
   Qed.
 
-  Lemma propagate_src_dst_chain:
+  Lemma propagate_sdom:
+    forall (dst: reg) (src: reg),
+      Some src = loads ! dst ->
+        exists (ks: node) (kd: node),
+          DefinedAt f ks src /\
+          DefinedAt f kd dst /\
+          StrictlyDominates f ks kd.
+  Proof.
+    intros dst src Hin.
+    apply propagate_src_dst in Hin.
+    destruct Hin as [k [addr [object [offset [Hload Hstore]]]]].
+    inversion Hload.
+    apply reaching_store_origin with (f := f) (aa := aa) in Hstore.
+    destruct Hstore as [orig [Hst_at Hsdom]].
+    inversion Hst_at.
+    assert (Hused_at: UsedAt f orig src).
+    {
+      unfold UsedAt. rewrite <- H6. unfold Uses. right. auto.
+    }
+    destruct H_f_valid as [Huses_have_defs _ _].
+    unfold uses_have_defs in Huses_have_defs.
+    generalize (Huses_have_defs orig src Hused_at).
+    intros Hdef.
+    destruct Hdef as [def [Hdefs Hdom]].
+    exists def. exists k.
+    split. apply Hdefs.
+    split. unfold DefinedAt. rewrite <- H0. unfold Defs. auto.
+    apply sdom_trans with (m := orig).
+    apply Hdom. apply Hsdom.
+  Qed.
+
+  Lemma propagate_chain_sdom:
     forall (dst: reg) (src: reg),
       chain loads dst src ->
-        exists (k: node) (addr: reg) (object: positive) (offset: positive),
-          loads_from f aa k dst addr object offset /\
-          store_reaches rs k src object offset.
-  Admitted.
+        exists (ks: node) (kd: node),
+          DefinedAt f ks src /\
+          DefinedAt f kd dst /\
+          StrictlyDominates f ks kd.
+  Proof.
+    intros dst src Hchain.
+    induction Hchain.
+    + apply propagate_sdom with (dst := dst). apply HE.
+    + destruct IHHchain1 as [ks1 [kd1 [Hdef1s [Hdef1d Hdom1]]]].
+      destruct IHHchain2 as [ks2 [kd2 [Hdef2s [Hdef2d Hdom2]]]].
+      assert (kd1 = ks2).
+      {
+        destruct H_f_valid as [_ Huniq _].
+        unfold defs_are_unique in Huniq.
+        apply Huniq with (r := mid). apply Hdef2s. apply Hdef1d.
+      }
+      subst kd1. clear Hdef2s.
+      exists ks1. exists kd2.
+      split. apply Hdef1s.
+      split. apply Hdef2d.
+      apply sdom_trans with (m := ks2).
+      apply Hdom1. apply Hdom2.
+  Qed.
 
   Lemma propagate_load_irrefl:
     forall (dst: reg) (src: reg),
@@ -121,37 +171,17 @@ Section LOAD_PROPERTIES.
       src <> dst.
   Proof.
     intros dst src Hin.
-    apply propagate_src_dst_chain in Hin; try apply Hloads.
-    intro contra. subst.
-    destruct Hin as [k [addr [object [offset [Hload Hstore]]]]].
-    inversion Hload.
-    inversion Hstore.
-    subst.
-    apply (reaching_store_origin f aa) in Hstore.
-    destruct Hstore as [orig [_ [_ [Hstore dom]]]].
-    inversion Hstore.
-    subst.
-    assert (Huse: Uses (LLSt addr0 dst next0) dst). unfold Uses. auto.
-    destruct H_f_valid as [Huses_have_defs Hdefs_are_unique _].
-    unfold uses_have_defs in Huses_have_defs.
-    unfold defs_are_unique in Hdefs_are_unique.
-    assert (Huse_dst: UsedAt f orig dst). 
-    { unfold UsedAt. rewrite <- H1. unfold Uses. auto. }
-    generalize (Huses_have_defs orig dst Huse_dst).
-    intros Hdef_exists.
-    destruct Hdef_exists as [def [Hdef Hdom]].
-    clear Huses_have_defs.
-    assert (Hkdef: k = def).
-    { 
-      apply Hdefs_are_unique with (r := dst). 
-      - apply Hdef.
-      - unfold DefinedAt. rewrite <- H0. unfold Defs. auto.
-    }
-    subst.
-    inversion Hdom.
-    inversion dom.
-    generalize (dom_antisym f orig def DOM0 DOM).
-    intros eq. apply STRICT in eq. inversion eq.
+    intro contra.
+    subst dst.
+    apply propagate_chain_sdom in Hin.
+    destruct Hin as [ks [kd [Hdefs [Hdefd Hdom]]]].
+    destruct H_f_valid as [_ Huniq _].
+    unfold defs_are_unique in Huniq.
+    assert (Hkeq: ks = kd). 
+    { apply Huniq with (r := src). apply Hdefd. apply Hdefs. }
+    subst kd.
+    apply sdom_irrefl in Hdom.
+    apply Hdom.
   Qed.
 
   Lemma propagate_use_inversion:
@@ -236,7 +266,6 @@ Section LOAD_PROPERTIES.
         }
       }
   Qed.
-
 End LOAD_PROPERTIES.
 
 Section PROPAGATE_PROPERTIES.
@@ -435,42 +464,37 @@ Section PROPAGATE_PROPERTIES.
           apply (H_loads_relation' loads loads' Heqloads').
           symmetry. apply Hsubst.
         }
-        generalize (propagate_src_dst_chain
-          f rs aa loads loads' 
+        generalize (propagate_chain_sdom 
+          f rs aa loads loads'
           H_f_valid
-          Heqloads Heqloads' 
+          Heqloads Heqloads'
           r' r
           Hchain).
-        intro Hprop.
-        destruct Hprop as [k [addr [object [offset]]]].
-        destruct H as [Hload Hstore].
-        inversion Hstore.
-        subst object0 offset0 val k0.
-        generalize (reaching_store_origin f aa rs k r object offset Hstore).
-        intros Hdef.
-        destruct Hdef as [def' [_ [_ [Hstored_at Hsdom']]]].
-        inversion Hstored_at.
-        subst object0 offset0 val n.
-        assert (Huse_of_r: UsedAt f def' r).
-        { unfold UsedAt. rewrite <- H0. unfold Uses. right. reflexivity. }
-        generalize (Hdefs def' r Huse_of_r).
-        intros Hdef.
-        destruct Hdef as [def [Hdef Hsdom]].
-        exists def.
-        split; rewrite Heqf'.
-        - apply preserves_defs. apply Hdef.
-        - apply preserves_sdom.
-          apply (sdom_trans f def k use).
-          + apply (sdom_trans f def def' k). apply Hsdom. apply Hsdom'.
-          + inversion Hload.
-            assert (Hdef_of_r': DefinedAt f k r').
-            { unfold DefinedAt. rewrite <- H3. unfold Defs. auto. }
-            assert (Huse_of_r': UsedAt f use r').
-            { unfold UsedAt. rewrite <- Hin. apply Huse. }
-            apply defs_dominate_uses with (r := r').
-            apply H_f_valid.
-            apply Hdef_of_r'.
-            apply Huse_of_r'.
+        intros Hprop.
+        destruct Hprop as [ks [kd [Hdefks [Hdefkd Hdom]]]].
+        exists ks.
+        split.
+        {
+          rewrite Heqf'.
+          apply preserves_defs.
+          apply Hdefks.
+        }
+        {
+          rewrite Heqf'.
+          apply preserves_sdom.
+          clear Huse_implies_def.
+          apply sdom_trans with (m := kd). apply Hdom.
+          assert (Hused_at_r': UsedAt f use r').
+          {
+            unfold UsedAt.
+            rewrite <- Hin.
+            apply Huse.
+          }
+          clear Hdom.
+          apply defs_dominate_uses with (r := r').
+          apply H_f_valid. apply Hdefkd. 
+          unfold UsedAt. rewrite <- Hin. apply Huse.
+        }
       }
     }
     (* Uses are unique *)

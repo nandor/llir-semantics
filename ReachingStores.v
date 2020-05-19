@@ -283,7 +283,7 @@ End Kildall.
 
 Definition reaching_stores := PTrie.t (PTrie.t (PTrie.t reg)).
 
-Axiom analyse_reaching_stores: 
+Axiom analyse_reaching_stores:
   forall (f: func) (aa: points_to_set), reaching_stores.
 
 Section ANALYSIS.
@@ -322,7 +322,7 @@ Section ANALYSIS.
     Inductive store_reaches: node -> reg -> positive -> positive -> Prop :=
       | store:
         forall (k: node) (val: reg) (object: positive) (offset: positive),
-          Some val = get_store_to k (object, offset) -> 
+          Some val = get_store_to k (object, offset) ->
           store_reaches k val object offset
       .
   End UTILITIES.
@@ -334,7 +334,7 @@ Section ANALYSIS.
     Theorem reaching_stores_dom:
       forall (use: node) (objects: PTrie.t (PTrie.t reg))
              (object: positive) (object': PTrie.t reg)
-             (offset: positive) (write: reg) 
+             (offset: positive) (write: reg)
              (def: node),
         Some objects = PTrie.get rs use ->
         Some object' = PTrie.get objects object ->
@@ -346,7 +346,7 @@ Section ANALYSIS.
     Theorem reaching_store_origin:
       forall (reach: node) (val: reg) (object: positive) (offset: positive),
         store_reaches rs reach val object offset ->
-          exists (orig: node) (addr: reg) (next: node),
+          exists (orig: node),
             stored_at aa orig object offset val
             /\
             StrictlyDominates f orig reach

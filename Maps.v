@@ -60,6 +60,38 @@ Module Type PARTIAL_MAP.
 
 End PARTIAL_MAP.
 
+Section LIST_FOLD.
+  Variable A: Type.
+  Variable B: Type.
+
+  Variable f: B -> A -> B.
+
+  Lemma fold_list_prop:
+    forall
+      (pB: B -> Prop)
+      (pE: A -> Prop)
+      (pK: forall (elem: A) (acc: B), pB acc -> pE elem -> pB (f acc elem))
+      (t: list A)
+      (b: B),
+      pB b -> (forall e, In e t -> pE e) -> pB (List.fold_left f t b).
+  Proof.
+    intros pB pE Helem.
+    induction t; intros b Hb He.
+    + apply Hb.
+    + assert (Hcons: a :: t = [a] ++ t). reflexivity.
+      rewrite Hcons.
+      rewrite List.fold_left_app.
+      apply IHt.
+      apply Helem.
+      - apply Hb.
+      - apply He. left. auto.
+      - intros e Hin.
+        apply He. right. apply Hin.
+  Qed.
+End LIST_FOLD.
+
+
+
 Module PTrie <: PARTIAL_MAP.
   Inductive tree (V: Type): Type :=
     | Leaf: tree V
@@ -131,7 +163,7 @@ Module PTrie <: PARTIAL_MAP.
 
     Lemma set_ne:
       forall (t: t V) (ks: key) (kg: key) (v: V),
-        ks <> kg -> 
+        ks <> kg ->
         get (set t ks v) kg = get t kg.
     Proof.
       intros t ks kg. generalize dependent ks. generalize dependent t.
@@ -140,7 +172,7 @@ Module PTrie <: PARTIAL_MAP.
     Qed.
 
     Lemma set_get:
-      forall (t: t V) (ks: key) (kg: key) (v: V), 
+      forall (t: t V) (ks: key) (kg: key) (v: V),
         get (set t ks v) kg = if Pos.eqb ks kg then Some v else get t kg.
     Proof.
       induction t0; intros ks kg v; destruct (Pos.eqb ks kg) eqn:E.
@@ -243,19 +275,52 @@ Module PTrie <: PARTIAL_MAP.
 
     Lemma to_list_helper_correct:
       forall (t: t V) (k: positive) (j: positive) (v: V) (acc: list (key * V)),
-        Some v = get t k -> In (append j k, v) (to_list_helper j t acc).
+        Some v = get t k <-> In (append j k, v) (to_list_helper j t acc).
     Admitted.
 
     Theorem to_list_correct:
       forall (t: t V) (k: key) (v: V),
-        Some v = get t k -> In (k, v) (to_list t).
-    Proof.
-      intros t k v Hin.
-      apply ((to_list_helper_correct t k xH) v [] Hin).
-    Qed.
+        Some v = get t k <-> In (k, v) (to_list t).
+    Admitted.
   End TO_LIST.
 
   Arguments to_list {V}.
+
+  Section ELEMENT.
+    Variable V: Type.
+
+    Hypothesis eq_decV:
+      forall (a: V) (b: V),
+        {a = b} + {a <> b}.
+
+    Fixpoint Elem (e: V) (l: t V): Prop :=
+      match l with
+      | Leaf => False
+      | Node l None r => Elem e l \/ Elem e r
+      | Node l (Some v) r => e = v \/ Elem e l \/ Elem e r
+      end.
+
+    Theorem elem_dec:
+      forall (trie: t V) (e: V) , {Elem e trie} + {~Elem e trie}.
+    Proof.
+      induction trie.
+      + intro e. auto.
+      + intro e.
+        generalize (IHtrie1 e).
+        generalize (IHtrie2 e).
+        intros H2 H1.
+        destruct o.
+        destruct (eq_decV e v); simpl; auto.
+        - destruct H1; destruct H2; simpl; auto.
+          right. unfold not. intros H.
+          repeat destruct H; auto.
+        - destruct H1; destruct H2; simpl; auto.
+          right. unfold not. intros H.
+          destruct H; auto.
+    Qed.
+  End ELEMENT.
+
+  Arguments Elem {V}.
 
   Section FOLD.
     Variable A: Type.
@@ -283,21 +348,35 @@ Module PTrie <: PARTIAL_MAP.
     Admitted.
 
     Theorem fold_prop:
-      forall 
-        (t: t A)
-        (pB: B -> Prop) 
+      forall
+        (pB: B -> Prop)
         (pE: key -> A -> Prop)
         (pK: forall (k: key) (a: A) (acc: B), pB acc -> pE k a -> pB (f acc k a))
+        (t: t A)
         (b: B),
-        pB b -> pB (fold t b).
-    Admitted.
-
+        pB b -> (forall (k: key) (a: A), Some a = get t k -> pE k a) -> pB (fold t b).
+    Proof.
+      intros pB pE pK.
+      intros t b Hb He.
+      rewrite fold_list.
+      apply fold_list_prop with
+        (pE := fun kv => match kv with (k, v) => pE k v end).
+      + intros e acc Hacc.
+        destruct e.
+        intros HpE.
+        apply pK. apply Hacc. simpl. apply HpE.
+      + apply Hb.
+      + intros e Hin.
+        destruct e.
+        apply He.
+        apply to_list_correct. apply Hin.
+    Qed.
   End FOLD.
 
   Section VALUES.
     Variable V: Type.
 
-    Definition values (t: t V) := 
+    Definition values (t: t V) :=
       List.map (fun elem => match elem with (_, v) => v end) (to_list t).
 
     Theorem values_correct:
@@ -331,7 +410,7 @@ Module PTrie <: PARTIAL_MAP.
         Some v = get (extract e) k -> exists k', Some (k, v) = get e k'.
     Admitted.
   End EXTRACT.
-  
+
   Section COMBINE.
     Variables A B C: Type.
     Variable f: option A -> option B -> option C.
@@ -536,7 +615,7 @@ Module PTrie <: PARTIAL_MAP.
 
     Theorem eqb_correct:
       forall t1 t2,
-        eqb t1 t2 = true -> 
+        eqb t1 t2 = true ->
         forall k, get t1 k = get t2 k.
     Admitted.
 
@@ -674,42 +753,6 @@ Module PTrie <: PARTIAL_MAP.
       }
     Qed.
   End BOOLEAN_EQUALITY.
-
-  Section ELEMENT.
-    Variable V: Type.
-
-    Hypothesis eq_decV: 
-      forall (a: V) (b: V),
-        {a = b} + {a <> b}.
-
-    Fixpoint Elem (e: V) (l: t V): Prop :=
-      match l with
-      | Leaf => False
-      | Node l None r => Elem e l \/ Elem e r
-      | Node l (Some v) r => e = v \/ Elem e l \/ Elem e r
-      end.
-
-    Theorem elem_dec:
-      forall (trie: t V) (e: V) , {Elem e trie} + {~Elem e trie}.
-    Proof.
-      induction trie.
-      + intro e. auto.
-      + intro e.
-        generalize (IHtrie1 e).
-        generalize (IHtrie2 e).
-        intros H2 H1.
-        destruct o.
-        destruct (eq_decV e v); simpl; auto.
-        - destruct H1; destruct H2; simpl; auto.
-          right. unfold not. intros H.
-          repeat destruct H; auto.
-        - destruct H1; destruct H2; simpl; auto.
-          right. unfold not. intros H.
-          destruct H; auto.
-    Qed.
-  End ELEMENT.
-
-  Arguments Elem {V}.
 End PTrie.
 
 Notation "a ! b" := (PTrie.get a b) (at level 1).
@@ -718,7 +761,7 @@ Notation "{ }" := PTrie.empty.
 Notation "{ k ! v }" := (PTrie.set PTrie.empty k v).
 
 Notation "{ e0 ; e1 ; .. ; en }" :=
-  (PTrie.set 
-    (PTrie.set .. (PTrie.set PTrie.empty (fst en) (snd en)) .. 
-     (fst e1) (snd e1)) 
+  (PTrie.set
+    (PTrie.set .. (PTrie.set PTrie.empty (fst en) (snd en)) ..
+     (fst e1) (snd e1))
    (fst e0) (snd e0)).
