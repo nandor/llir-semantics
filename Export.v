@@ -8,6 +8,10 @@ Require Import Coq.Lists.List.
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 Require Import LLIR.Dom.
+Require Import LLIR.State.
+
+Import ListNotations.
+
 
 Ltac inversion_proof fn :=
   intros inst n Heq;
@@ -96,7 +100,8 @@ Ltac block_elem_proof func func_inv p proof_prev :=
   [ intro contra; inversion contra
   | intro contra; inversion contra
   | apply proof_prev
-  | unfold SuccOf; simpl; auto
+  | compute; reflexivity
+  | compute; intro contra; inversion contra
   | auto
   | intros prev' Hsucc;
     unfold SuccOf in Hsucc; unfold Succeeds in Hsucc;
@@ -106,13 +111,45 @@ Ltac block_elem_proof func func_inv p proof_prev :=
     repeat destruct Hinst as [[Hl Hr]|Hinst]; subst inst; auto; try inversion Hsucc; try inversion H
   ].
 
-Ltac block_header_proof func func_inv :=
-  right;
-  intros term Hsucc;
-  unfold SuccOf in Hsucc; unfold Succeeds in Hsucc; unfold TermAt;
-  remember ((fn_insts func) ! term) as inst eqn:H;
-  symmetry in H;
-  apply func_inv in H;
-  repeat destruct H as [[Hl Hr]|H];
-    subst inst; try subst term; simpl; auto;
-    inversion Hsucc; inversion H.
+Ltac block_header_proof func func_inv bb_reach :=
+  apply block_header;
+  [ apply bb_reach
+  | intros term Hsucc;
+    unfold SuccOf in Hsucc; unfold Succeeds in Hsucc; unfold TermAt;
+    remember ((fn_insts func) ! term) as inst eqn:H;
+    symmetry in H;
+    apply func_inv in H;
+    repeat destruct H as [[Hl Hr]|H];
+      subst inst; try subst term; simpl; auto;
+      inversion Hsucc; inversion H
+  | intros contra; inversion contra
+  ].
+
+
+Ltac bb_headers_proof func func_inversion :=
+  intros header Hbb;
+  inversion Hbb as
+    [ header' REACH TERM NODE H' H
+    | header' prev elem NOT_HEADER NOT_ENTRY BLOCK PRED NODE NOPHI UNIQ H' H
+    ];
+  [
+    remember ((fn_insts func) ! header) as inst eqn:Einst;
+    remember (get_predecessors func header) as pred eqn:Epred;
+    symmetry in Einst;
+    apply func_inversion in Einst;
+    repeat (destruct Einst as [[Ehdr Ei]|Einst]; [auto; (
+      rewrite <- Ehdr in Epred;
+      compute in Epred;
+      match goal with
+      | [ E: pred = [ ?p ] |- _ ] =>
+        assert (Hsucc: SuccOf func p header);
+        subst header;
+        compute;
+        auto;
+        apply TERM in Hsucc;
+        compute in Hsucc;
+        inversion Hsucc
+      end)|]);
+    apply NODE in Einst; inversion Einst
+  | assert (Hh: header = header); [reflexivity|]; apply NOT_HEADER in Hh; inversion Hh
+  ].

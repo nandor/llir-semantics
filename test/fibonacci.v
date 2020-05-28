@@ -173,9 +173,7 @@ Theorem fib_reach_17: Reachable fib 17%positive. Proof. reach_pred_step fib 15%p
 
 Theorem fib_bb_1: BasicBlock fib 1%positive 1%positive.
 Proof.
-  apply block_header.
-  apply fib_reach_1.
-auto.
+  block_header_proof fib fib_inversion fib_reach_1.
 Qed.
 
 Theorem fib_bb_2: BasicBlock fib 1%positive 2%positive.
@@ -200,9 +198,7 @@ Qed.
 
 Theorem fib_bb_6: BasicBlock fib 6%positive 6%positive.
 Proof.
-  apply block_header.
-  apply fib_reach_6.
-  block_header_proof fib fib_inversion.
+  block_header_proof fib fib_inversion fib_reach_6.
 Qed.
 
 Theorem fib_bb_7: BasicBlock fib 6%positive 7%positive.
@@ -217,9 +213,7 @@ Qed.
 
 Theorem fib_bb_12: BasicBlock fib 12%positive 12%positive.
 Proof.
-  apply block_header.
-  apply fib_reach_12.
-  block_header_proof fib fib_inversion.
+  block_header_proof fib fib_inversion fib_reach_12.
 Qed.
 
 Theorem fib_bb_13: BasicBlock fib 12%positive 13%positive.
@@ -239,14 +233,25 @@ Qed.
 
 Theorem fib_bb_17: BasicBlock fib 17%positive 17%positive.
 Proof.
-  apply block_header.
-  apply fib_reach_17.
-  block_header_proof fib fib_inversion.
+  block_header_proof fib fib_inversion fib_reach_17.
 Qed.
 
-Theorem fib_bb_dom_tree:
-  Dominates fib 5%positive 17%positive
-  \/
-  Dominates fib 5%positive 6%positive.
-Admitted.
+Theorem fib_bb_headers: 
+  forall (header: node), 
+    BasicBlock fib header header ->
+      header = 1%positive
+      \/
+      header = 6%positive
+      \/
+      header = 12%positive
+      \/
+      header = 17%positive.
+Proof. bb_headers_proof fib fib_inversion. Qed.
+
+Definition fib_dominator_solution := 
+  << (12%positive, [1%positive; 6%positive; 12%positive])
+  ;  (6%positive, [1%positive; 6%positive])
+  ;  (17%positive, [1%positive; 17%positive])
+  ;  (1%positive, [1%positive])
+  >>.
 

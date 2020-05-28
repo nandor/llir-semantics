@@ -110,7 +110,7 @@ Section FUNCTION.
 
   Theorem path_last:
     forall (n: node) (m: node) (nm: list node),
-      n <> m -> Path n nm m -> 
+      n <> m -> Path n nm m ->
         exists (p: node) (np: list node),
           nm = np ++ [p] /\ Path n np p /\ SuccOf f p m.
   Proof.
@@ -252,7 +252,7 @@ Section FUNCTION.
     inversion Hdom. apply reach_entry. apply REACH.
   Qed.
 
-  Lemma sdom_not_dom: 
+  Lemma sdom_not_dom:
     forall n m,
       StrictlyDominates n m -> ~Dominates m n.
   Admitted.
@@ -317,7 +317,7 @@ Section FUNCTION.
     intros n m p Hnm Hmp.
     inversion Hnm.
     inversion Hmp.
-    constructor. 
+    constructor.
     apply (dom_trans n m p); auto.
     intro contra. subst.
     assert (Heq: m = p). { apply (dom_antisym p m); auto. }
@@ -337,7 +337,8 @@ Section FUNCTION.
     | block_header:
       forall (header: node)
         (REACH: Reachable header)
-        (TERM: header = entry \/ forall (term: node), SuccOf f term header -> TermAt f term),
+        (TERM: forall (term: node), SuccOf f term header -> TermAt f term)
+        (NODE: f.(fn_insts) ! header <> None),
         BasicBlock header header
     | block_elem:
       forall (header: node) (prev: node) (elem: node)
@@ -345,6 +346,7 @@ Section FUNCTION.
         (NOT_ENTRY: entry <> elem)
         (BLOCK: BasicBlock header prev)
         (PRED: SuccOf f prev elem)
+        (NODE: f.(fn_insts) ! header <> None)
         (NOPHI: f.(fn_phis) ! elem = None)
         (UNIQ: forall (prev': node), SuccOf f prev' elem -> prev' = prev),
         BasicBlock header elem
@@ -357,14 +359,6 @@ Section FUNCTION.
     intros header elem Hbb.
     induction Hbb. apply REACH.
     apply reach_succ with (a := prev); auto.
-  Qed.
-
-  Theorem bb_entry_header:
-    BasicBlock entry entry.
-  Proof.
-    apply block_header.
-    apply reach_entry.
-    left. reflexivity.
   Qed.
 
   Theorem bb_header_dom_nodes:
@@ -397,7 +391,7 @@ Lemma eq_cfg_dom:
   forall (f: func) (f': func),
     (forall (src: node) (dst: node), SuccOf f src dst <-> SuccOf f' src dst) ->
     forall (src: node) (dst: node),
-      Dominates f src dst <-> 
+      Dominates f src dst <->
       Dominates f' src dst.
 Admitted.
 

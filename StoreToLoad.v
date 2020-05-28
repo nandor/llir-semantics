@@ -88,7 +88,7 @@ Section LOAD_PROPERTIES.
   Proof.
     intros src dst Helem.
     subst loads.
-    apply PTrie.extract_correct in Helem.
+    apply PTrie.extract_inversion in Helem.
     destruct Helem as [k Helem].
     exists k.
     apply PTrie.map_opt_inversion in Helem.

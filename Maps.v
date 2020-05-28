@@ -206,6 +206,40 @@ Module PTrie <: PARTIAL_MAP.
     | xI i => xI (append i r)
     end.
 
+  Lemma append_assoc_0:
+    forall (i j : positive),
+      append i (xO j) = append (append i (xO xH)) j.
+  Proof.
+    induction i; intros; destruct j; simpl;
+    try rewrite (IHi (xI j));
+    try rewrite (IHi (xO j));
+    try rewrite <- (IHi xH);
+    auto.
+  Qed.
+
+  Lemma append_assoc_1:
+    forall (i j : positive),
+      append i (xI j) = append (append i (xI xH)) j.
+  Proof.
+    induction i; intros; destruct j; simpl;
+    try rewrite (IHi (xI j));
+    try rewrite (IHi (xO j));
+    try rewrite <- (IHi xH);
+    auto.
+  Qed.
+
+  Lemma append_neutral_r:
+    forall (i : positive), append i xH = i.
+  Proof.
+    induction i; simpl; congruence.
+  Qed.
+
+  Lemma append_neutral_l: 
+    forall (i : positive), append xH i = i.
+  Proof.
+    simpl; auto.
+  Qed.
+
   Section MAP_OPT.
     Variables A B: Type.
     Variable f: key -> A -> option B.
@@ -220,21 +254,38 @@ Module PTrie <: PARTIAL_MAP.
           end
         in
         Node
-          (map_opt_helper l (append (xO xH) k))
+          (map_opt_helper l (append k (xO xH)))
           v'
-          (map_opt_helper r (append (xI xH) k))
+          (map_opt_helper r (append k (xI xH)))
       end.
+
+    Lemma map_opt_helper_correct:
+      forall (i: key) (j: key) (t: t A) (a: A),
+        Some a = get t i -> f (append j i) a = get (map_opt_helper t j) i.
+    Proof.
+      induction i; intros j t a Hget; destruct t; try inversion Hget; simpl.
+      - rewrite append_assoc_1. apply IHi. auto.
+      - rewrite append_assoc_0. apply IHi. auto.
+      - rewrite append_neutral_r. destruct o; inversion Hget. reflexivity.
+    Qed.
 
     Definition map_opt (a: t A): t B := map_opt_helper a xH.
 
     Theorem map_opt_correct:
-      forall (t: t A) (k: key) (a: A) (b: B),
-        (Some a = get t k /\ Some b = f k a) -> Some b = get (map_opt t) k.
-    Admitted.
+      forall (t: t A) (k: key) (a: A),
+        (Some a = get t k) -> f k a = get (map_opt t) k.
+    Proof.
+      intros t k a Hget.
+      generalize (map_opt_helper_correct k xH t Hget). intros H.
+      simpl in H. rewrite H.
+      unfold map_opt.
+      reflexivity.
+    Qed.
 
     Theorem map_opt_inversion:
       forall (t: t A) (k: key) (b: B),
-         Some b = get (map_opt t) k -> exists a, (Some a = get t k /\ Some b = f k a).
+         Some b = get (map_opt t) k -> 
+          exists a, (Some a = get t k /\ Some b = f k a).
     Admitted.
   End MAP_OPT.
 
@@ -273,7 +324,7 @@ Module PTrie <: PARTIAL_MAP.
       | Node l (Some v) r =>
         let r' := to_list_helper (append k (xI xH)) r acc in
         let v' := (k, v) :: r' in
-        to_list_helper (append (xO xH) k) l v'
+        to_list_helper (append k (xO xH)) l v'
       end.
 
     Definition to_list (t: t V) := to_list_helper xH t [].
@@ -424,7 +475,7 @@ Module PTrie <: PARTIAL_MAP.
         t
         PTrie.empty.
 
-    Theorem extract_correct:
+    Theorem extract_inversion:
       forall (e: t (key *  V)) (k: key) (v: V),
         Some v = get (extract e) k -> exists k', Some (k, v) = get e k'.
     Admitted.
