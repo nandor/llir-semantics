@@ -18,16 +18,21 @@ Definition rewrite_uses (i: inst) (f: reg -> reg): inst :=
   | LLLd addr dst next => LLLd (f addr) dst next
   | LLSt addr val next => LLSt (f addr) (f val) next
   | LLArg index dst next => i
-  | LLConst value dst next => i
+  | LLInt8 _ _ _ => i
+  | LLInt16 _ _ _ => i
+  | LLInt32 _ _ _ => i
+  | LLInt64 _ _ _ => i
   | LLFrame object dst next => i
   | LLGlobal object dst next => i
   | LLExtern id next => i
   | LLInvoke t args dst next exn => LLInvoke (f t) (List.map f args) dst next exn
   | LLRet value => LLRet (f value)
+  | LLRetVoid => LLRetVoid
   | LLJcc cond bt bf => LLJcc (f cond) bt bf
   | LLJmp target => i
-  | LLUnop op arg dst next => LLUnop op (f arg) dst next
-  | LLBinop op lhs rhs dst next => LLBinop op (f lhs) (f rhs) dst next
+  | LLUndef _ _ _ => i
+  | LLUnop ty op arg dst next => LLUnop ty op (f arg) dst next
+  | LLBinop ty op lhs rhs dst next => LLBinop ty op (f lhs) (f rhs) dst next
   end.
 
 
@@ -37,5 +42,5 @@ Theorem use_rewritten:
 Proof.
   destruct i; intros src f Huse; simpl; inversion Huse; try rewrite H; auto.
   right. apply List.in_map_iff. exists src.
-  split. reflexivity. apply H. 
+  split. reflexivity. apply H.
 Qed.

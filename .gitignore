@@ -4,3 +4,5 @@
 *.glob
 *.aux
 .depend*
+Runtime.v
+*.llbc

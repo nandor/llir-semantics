@@ -16,6 +16,8 @@ PROOFS=\
 	Maps.vo\
 	State.vo\
 	LLIR.vo\
+	Export.vo\
+	SmallStep.vo\
 	Closure.vo\
 	Transform.vo\
 	Dom.vo\
@@ -23,7 +25,14 @@ PROOFS=\
 	Aliasing.vo\
 	Verify.vo\
 	ReachingStores.vo\
-	StoreToLoad.vo
+	StoreToLoad.vo\
+	test/fibonacci.vo
+
+# LLIR examples.
+test/%.v: test/%.llbc
+	llir-opt $^ -o $@ -O2
+test/%.llbc: test/%.c
+	llir-clang -c $^ -o $@ -O3
 
 # Toplevel.
 all:
@@ -49,6 +58,8 @@ proof: $(PROOFS)
 clean:
 	rm -f .depend.v
 	rm -f *.vo *.vok *.vos *.glob .*.aux .merlin
+	rm -f test/*.vo test/*.vok test/*.vos test/*.glob
+	rm -f test/fibonacci.v
 
 
 -include .depend.v

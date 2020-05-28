@@ -37,9 +37,9 @@ Section CLOSURE.
     forall (dst: reg) (src: reg),
       Some src = l ! dst -> chain dst src.
 
-  Lemma is_valid_empty: 
+  Lemma is_valid_empty:
     is_relation PTrie.empty.
-  Proof. 
+  Proof.
     intros dst src Hin. inversion Hin.
   Qed.
 
@@ -53,7 +53,7 @@ Section CLOSURE.
 
   Lemma find_match_chain:
     forall (l: relation),
-      is_relation l -> 
+      is_relation l ->
       forall (s: reg) (s': reg),
         s' = find_match l s -> s = s' \/ chain s s'.
   Proof.
@@ -68,12 +68,12 @@ Section CLOSURE.
     PTrie.map (fun d s => if Pos.eqb s d' then s' else s) l.
 
   Example update_map_example :=
-    { (2%positive, 3%positive)
-    ; (1%positive, 3%positive)
-    ; (5%positive, 3%positive)
-    }.
+    << (2%positive, 3%positive)
+    ;  (1%positive, 3%positive)
+    ;  (5%positive, 3%positive)
+    >>.
 
-  Example update_map_example' := 
+  Example update_map_example' :=
     update_map update_map_example 3%positive 5%positive.
 
   Fact update_map_2: update_map_example' ! 2%positive = Some 5%positive.
@@ -132,7 +132,7 @@ Section CLOSURE.
         apply Helem.
       }
       {
-        apply closure_chain_step with (mid := src). 
+        apply closure_chain_step with (mid := src).
         apply H.
         apply H_loads_valid. apply Helem.
       }
@@ -166,9 +166,9 @@ Section CLOSURE.
   Qed.
 
   Example closure_helper_example :=
-    { (2%positive, 5%positive)
-    ; (3%positive, 5%positive)
-    }.
+    << (2%positive, 5%positive)
+    ;  (3%positive, 5%positive)
+    >>.
 
   Definition closure_helper_example' :=
     closure_helper closure_helper_example 5%positive 6%positive.
@@ -196,10 +196,10 @@ Section CLOSURE.
   Qed.
 
   Example chain_example :=
-    { ( 4%positive, 3%positive)
-    ; ( 3%positive, 2%positive)
-    ; ( 2%positive, 1%positive)
-    }.
+    << ( 4%positive, 3%positive)
+    ;  ( 3%positive, 2%positive)
+    ;  ( 2%positive, 1%positive)
+    >>.
 
   Definition chain_example' := closure chain_example.
 

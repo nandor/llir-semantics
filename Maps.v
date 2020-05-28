@@ -228,6 +228,11 @@ Module PTrie <: PARTIAL_MAP.
     Definition map_opt (a: t A): t B := map_opt_helper a xH.
 
     Theorem map_opt_correct:
+      forall (t: t A) (k: key) (a: A) (b: B),
+        (Some a = get t k /\ Some b = f k a) -> Some b = get (map_opt t) k.
+    Admitted.
+
+    Theorem map_opt_inversion:
       forall (t: t A) (k: key) (b: B),
          Some b = get (map_opt t) k -> exists a, (Some a = get t k /\ Some b = f k a).
     Admitted.
@@ -245,7 +250,7 @@ Module PTrie <: PARTIAL_MAP.
     Proof.
       intros t k b.
       intros Hmapped.
-      apply map_opt_correct in Hmapped.
+      apply map_opt_inversion in Hmapped.
       destruct Hmapped as [a [Hget Hf]].
       exists a.
       split. apply Hget. inversion Hf. auto.
@@ -390,6 +395,20 @@ Module PTrie <: PARTIAL_MAP.
       split. auto.
       apply to_list_correct.
       apply Helem.
+    Qed.
+
+    Theorem values_inversion:
+      forall (t: t V) (v: V),
+        In v (values t) -> exists (k: key), Some v = get t k.
+    Proof.
+      intros t v Hin.
+      apply in_map_iff in Hin.
+      destruct Hin as [kv [Hl Hr]].
+      destruct kv.
+      exists k.
+      apply to_list_correct.
+      subst v0.
+      apply Hr.
     Qed.
   End VALUES.
 
@@ -757,10 +776,11 @@ End PTrie.
 
 Notation "a ! b" := (PTrie.get a b) (at level 1).
 
-Notation "{ }" := PTrie.empty.
-Notation "{ k ! v }" := (PTrie.set PTrie.empty k v).
+Notation "<< >>" := PTrie.empty.
 
-Notation "{ e0 ; e1 ; .. ; en }" :=
+Notation "<< e >>" := (PTrie.set PTrie.empty (fst e) (snd e)).
+
+Notation "<< e0 ; e1 ; .. ; en >>" :=
   (PTrie.set
     (PTrie.set .. (PTrie.set PTrie.empty (fst en) (snd en)) ..
      (fst e1) (snd e1))

@@ -21,12 +21,12 @@ Import ListNotations.
 
 
 Definition find_load_reg (insts: inst_map) (rs: reaching_stores) (aa: points_to_set): PTrie.t reg :=
-  PTrie.extract (PTrie.map_opt 
+  PTrie.extract (PTrie.map_opt
     (fun k inst =>
       match inst with
       | LLLd addr dst next =>
         match get_load_addr aa addr with
-        | Some obj => 
+        | Some obj =>
           match get_store_to rs k obj with
           | Some src => Some (dst, src)
           | None => None
@@ -55,7 +55,7 @@ Definition propagate_store_to_load (f: func): func :=
   let rs := analyse_reaching_stores f aa in
   let loads := closure (find_load_reg f.(fn_insts) rs aa) in
   let fn_insts := rewrite_insts f.(fn_insts) loads in
-  mkfunc f.(fn_args) f.(fn_stack) fn_insts f.(fn_phis) f.(fn_entry).
+  mkfunc f.(fn_stack) fn_insts f.(fn_phis) f.(fn_entry).
 
 
 Section LOAD_PROPERTIES.
@@ -70,7 +70,7 @@ Section LOAD_PROPERTIES.
   Hypothesis Heqloads': loads' = closure loads.
 
   Lemma H_loads_relation: is_relation loads loads.
-  Proof. 
+  Proof.
     intros dst src. intros H. apply closure_chain_elem. apply H.
   Qed.
 
@@ -91,7 +91,7 @@ Section LOAD_PROPERTIES.
     apply PTrie.extract_correct in Helem.
     destruct Helem as [k Helem].
     exists k.
-    apply PTrie.map_opt_correct in Helem.
+    apply PTrie.map_opt_inversion in Helem.
     destruct Helem as [inst].
     destruct H as [Hinst Hfunc].
     destruct inst; inversion Hfunc; clear H0.
@@ -126,7 +126,7 @@ Section LOAD_PROPERTIES.
     {
       unfold UsedAt. rewrite <- H6. unfold Uses. right. auto.
     }
-    destruct H_f_valid as [Huses_have_defs _ _].
+    destruct H_f_valid as [Huses_have_defs _].
     unfold uses_have_defs in Huses_have_defs.
     generalize (Huses_have_defs orig src Hused_at).
     intros Hdef.
@@ -153,7 +153,7 @@ Section LOAD_PROPERTIES.
       destruct IHHchain2 as [ks2 [kd2 [Hdef2s [Hdef2d Hdom2]]]].
       assert (kd1 = ks2).
       {
-        destruct H_f_valid as [_ Huniq _].
+        destruct H_f_valid as [_ Huniq].
         unfold defs_are_unique in Huniq.
         apply Huniq with (r := mid). apply Hdef2s. apply Hdef1d.
       }
@@ -167,7 +167,7 @@ Section LOAD_PROPERTIES.
 
   Lemma propagate_load_irrefl:
     forall (dst: reg) (src: reg),
-      chain loads dst src -> 
+      chain loads dst src ->
       src <> dst.
   Proof.
     intros dst src Hin.
@@ -175,9 +175,9 @@ Section LOAD_PROPERTIES.
     subst dst.
     apply propagate_chain_sdom in Hin.
     destruct Hin as [ks [kd [Hdefs [Hdefd Hdom]]]].
-    destruct H_f_valid as [_ Huniq _].
+    destruct H_f_valid as [_ Huniq].
     unfold defs_are_unique in Huniq.
-    assert (Hkeq: ks = kd). 
+    assert (Hkeq: ks = kd).
     { apply Huniq with (r := src). apply Hdefd. apply Hdefs. }
     subst kd.
     apply sdom_irrefl in Hdom.
@@ -204,13 +204,14 @@ Section LOAD_PROPERTIES.
     unfold rewrite_reg in Huser'.
     unfold Uses in Huses.
     unfold Uses.
-    destruct user eqn:Euser; destruct Huses;
+    destruct user eqn:Euser;
+      destruct Huses;
       repeat match goal with
-      | [ |- context [loads' ! ?reg] ] => 
+      | [ |- context [loads' ! ?reg] ] =>
         destruct (loads' ! reg) eqn:?reg
-      | [ H: _ ! ?reg = Some ?v |- context [ _ ! _ = Some ?v ] ] => 
+      | [ H: _ ! ?reg = Some ?v |- context [ _ ! _ = Some ?v ] ] =>
         right; exists reg; auto
-      | [ H: _ = ?r |- context [ Some ?r ] ] => 
+      | [ H: _ = ?r |- context [ Some ?r ] ] =>
         rewrite <- H
       | [ H0: ?loads ! ?reg = None, H1: ?loads ! ?reg = Some _ |- _ ] =>
         rewrite H0 in H1; inversion H1
@@ -243,7 +244,7 @@ Section LOAD_PROPERTIES.
           subst. rewrite E in r0. inversion r0.
         }
       }
-      { 
+      {
         destruct (loads' ! x) eqn:E; subst.
         * exists x. split. apply E. right. apply Hin.
         * rewrite E in r0. inversion r0.
@@ -274,8 +275,8 @@ Section PROPAGATE_PROPERTIES.
 
   Lemma preserves_succ:
     forall (src: node) (dst: node),
-      Succ f src dst <-> 
-      Succ (propagate_store_to_load f) src dst.
+      SuccOf f src dst <->
+      SuccOf (propagate_store_to_load f) src dst.
   Proof.
     remember (local_pta f) as aa.
     remember (analyse_reaching_stores f aa) as rs.
@@ -287,12 +288,12 @@ Section PROPAGATE_PROPERTIES.
       unfold propagate_store_to_load.
       unfold rewrite_insts.
       unfold rewrite_inst.
-      unfold Succ in *.
+      unfold SuccOf in *.
       simpl.
       rewrite PTrie.map_get.
       destruct ((fn_insts f) ! src); try inversion Hsucc.
       unfold rewrite_uses. simpl.
-      unfold SuccessorOfInst in *.
+      unfold Succeeds in *.
       destruct i; subst; auto.
     }
     {
@@ -300,23 +301,23 @@ Section PROPAGATE_PROPERTIES.
       unfold propagate_store_to_load in *.
       unfold rewrite_insts in *.
       unfold rewrite_inst in *.
-      unfold Succ in *.
+      unfold SuccOf in *.
       simpl in Hsucc.
       rewrite PTrie.map_get in Hsucc.
       destruct ((fn_insts f) ! src); try inversion Hsucc.
       simpl in Hsucc.
-      unfold SuccessorOfInst in *.
+      unfold Succeeds in *.
       destruct i; subst; auto.
     }
   Qed.
 
   Lemma preserves_dom:
     forall (src: node) (dst: node),
-      Dominates f src dst <-> 
+      Dominates f src dst <->
       Dominates (propagate_store_to_load f) src dst.
   Proof.
     intros src dst.
-    split; 
+    split;
       intros Hdom;
       apply (eq_cfg_dom f (propagate_store_to_load f));
       try apply preserves_succ;
@@ -325,13 +326,13 @@ Section PROPAGATE_PROPERTIES.
 
   Lemma preserves_sdom:
     forall (src: node) (dst: node),
-      StrictlyDominates f src dst <-> 
+      StrictlyDominates f src dst <->
       StrictlyDominates (propagate_store_to_load f) src dst.
   Proof.
     intros src dst.
-    split; 
-      intro Hdom; inversion Hdom; 
-      subst; 
+    split;
+      intro Hdom; inversion Hdom;
+      subst;
       apply sdom_path; try apply STRICT; apply preserves_dom; apply DOM.
   Qed.
 
@@ -344,7 +345,7 @@ Section PROPAGATE_PROPERTIES.
     {
       intro Hdef'.
       unfold DefinedAt in Hdef'.
-      destruct ((fn_insts (propagate_store_to_load f)) ! n) eqn:E; 
+      destruct ((fn_insts (propagate_store_to_load f)) ! n) eqn:E;
         try inversion Hdef'.
       unfold propagate_store_to_load, rewrite_insts in E.
       simpl in E. symmetry in E.
@@ -382,7 +383,7 @@ Section PROPAGATE_PROPERTIES.
     remember (analyse_reaching_stores f aa) as rs.
     remember ((find_load_reg (fn_insts f) rs aa)) as loads.
     remember (closure loads) as loads'.
-    destruct H_f_valid as [Hdefs Huniq Hord].
+    destruct H_f_valid as [Hdefs Huniq].
     repeat split.
     (* Defs have uses *)
     {
@@ -404,8 +405,8 @@ Section PROPAGATE_PROPERTIES.
       apply PTrie.map_in in E.
       destruct E.
       destruct H as [Hin Hwr].
-      generalize (propagate_use_inversion 
-        f rs aa loads loads' 
+      generalize (propagate_use_inversion
+        f rs aa loads loads'
         H_f_valid Heqloads Heqloads'
         x user' r
         Hwr Hused).
@@ -460,11 +461,11 @@ Section PROPAGATE_PROPERTIES.
       {
         destruct H as [r' [Hsubst Huse]].
         assert (Hchain: chain loads r' r).
-        { 
+        {
           apply (H_loads_relation' loads loads' Heqloads').
           symmetry. apply Hsubst.
         }
-        generalize (propagate_chain_sdom 
+        generalize (propagate_chain_sdom
           f rs aa loads loads'
           H_f_valid
           Heqloads Heqloads'
@@ -492,7 +493,7 @@ Section PROPAGATE_PROPERTIES.
           }
           clear Hdom.
           apply defs_dominate_uses with (r := r').
-          apply H_f_valid. apply Hdefkd. 
+          apply H_f_valid. apply Hdefkd.
           unfold UsedAt. rewrite <- Hin. apply Huse.
         }
       }
@@ -509,17 +510,6 @@ Section PROPAGATE_PROPERTIES.
       generalize (Huniq def def' r).
       intros Huniqr.
       apply Huniqr. apply Hdef_def. apply Hdef_def'.
-    }
-    {
-      unfold well_ordered.
-      intros def use.
-      intros Hsdom.
-      generalize (Hord def use).
-      intros Hord'.
-      apply Hord'.
-      apply preserves_sdom.
-      rewrite <- Heqf'.
-      apply Hsdom.
     }
   Qed.
 End PROPAGATE_PROPERTIES.

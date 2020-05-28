@@ -9,7 +9,10 @@ Require Import Coq.ZArith.ZArith.
 
 Definition name := positive.
 
-
+Inductive bit : Type :=
+  | I
+  | O
+  .
 
 Module Type VALUE.
   Parameter t : Type.
@@ -19,24 +22,29 @@ Module DOUBLE (BASE : VALUE).
   Definition t := (BASE.t * BASE.t)%type.
 End DOUBLE.
 
-Module Nibble <: VALUE.
-  Definition t := (bool * bool * bool * bool)%type.
-End Nibble.
+Module INT1 <: VALUE.
 
-Module Byte := DOUBLE Nibble.
+  Definition t := bit.
+End INT1.
 
-Module Word := DOUBLE Byte.
+Module INT2 := DOUBLE INT1.
 
-Module DoubleWord := DOUBLE Word.
+Module INT4 := DOUBLE INT2.
 
-Module QuadWord := DOUBLE DoubleWord.
+Module INT8 := DOUBLE INT4.
+
+Module INT16 := DOUBLE INT8.
+
+Module INT32 := DOUBLE INT16.
+
+Module INT64 := DOUBLE INT32.
 
 
 
-Definition nibble := Nibble.t.
-Definition byte := Byte.t.
-Definition word := Word.t.
-Definition dword := DoubleWord.t.
+Definition nibble := INT4.t.
+Definition byte := INT8.t.
+Definition word := INT16.t.
+Definition dword := INT32.t.
 
 Inductive sym : Type :=
   | SFrame (frame: positive) (object: positive) (offset: positive)
@@ -46,7 +54,10 @@ Inductive sym : Type :=
   .
 
 Inductive qword : Type :=
-  | QVal (val: QuadWord.t)
+  | QVal (val: INT64.t)
   | QSym (val: sym)
   .
 
+Inductive value : Type :=
+  | Val8 (v: INT8.t)
+  .

@@ -28,14 +28,9 @@ Section VALIDITY.
       DefinedAt f def' r ->
       def' = def.
 
-  Definition well_ordered :=
-    forall (def: node) (use: node),
-      StrictlyDominates f def use -> Pos.lt def use.
-
   Record is_valid : Prop :=
     { fn_uses_have_defs: uses_have_defs
     ; fn_defs_are_unique: defs_are_unique
-    ; fn_well_ordered: well_ordered
     }.
 
   Theorem defs_dominate_uses:
@@ -46,7 +41,7 @@ Section VALIDITY.
       StrictlyDominates f def use.
   Proof.
     intros Hvalid def use r.
-    destruct Hvalid as [Huses_have_defs Hdefs_are_unique _].
+    destruct Hvalid as [Huses_have_defs Hdefs_are_unique].
     intros Hdef.
     intros Huse.
     unfold uses_have_defs in Huses_have_defs.
