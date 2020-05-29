@@ -157,28 +157,6 @@ Proof. used_at_inversion_proof fib fib_inversion. Qed.
 Theorem fib_defs_are_unique: defs_are_unique fib.
 Proof. defs_are_unique_proof fib_defined_at_inversion. Qed.
 
-Ltac bb_headers_proof func func_inversion :=
-  intros header Hbb;
-  inversion Hbb as [header'' REACH TERM NODE];
-  remember ((fn_insts func) ! header) as inst eqn:Einst;
-  remember (get_predecessors func header) as pred eqn:Epred;
-  symmetry in Einst;
-  apply func_inversion in Einst;
-  repeat (destruct Einst as [[Ehdr Ei]|Einst]; [auto; (
-    rewrite <- Ehdr in Epred;
-    compute in Epred;
-    match goal with
-    | [ E: pred = [ ?p ] |- _ ] =>
-      assert (Hsucc: SuccOf func p header);
-      subst header;
-      compute;
-      auto;
-      apply TERM in Hsucc;
-      compute in Hsucc;
-      inversion Hsucc
-    end)|]);
-  apply NODE in Einst; inversion Einst.
-  
 Theorem fib_bb_headers: 
   forall (header: node), 
     BlockHeader fib header ->
@@ -219,53 +197,9 @@ Theorem fib_bb_inversion:
       12%positive = header /\ 15%positive = elem
       \/
       17%positive = header /\ 17%positive = elem.
-Proof.
-  intros header elem Hbb.
-  destruct ((fn_insts fib) ! elem) eqn:Einst.
-  {
-    apply fib_inversion in Einst.
-    repeat destruct Einst as [[Helem Hinst]|Einst];
-      repeat match goal with
-      | [ H: Some _ = Some _ |- _ ] =>
-        inversion H; clear H
-      | [ H: ?e = elem |- ?n = header /\ ?e = elem ] =>
-        split; [clear H0|apply Helem]
-      | [ H: ?e = elem |- (?n = header /\ ?e = elem) \/ _ ] =>
-        left
-      | [ H: ?e = elem |- _ ] =>
-        right
-      | [ H: ?e = elem |- ?e = header ] =>
-        inversion Hbb; clear Hbb;
-        [ auto
-        |
-        ]
-      | [ H: SuccOf fib ?prev elem |- _ ] =>
-        apply get_predecessors_correct in H;
-        rewrite <- Helem in H;
-        simpl in H;
-        repeat destruct H as [Hpred|H]; subst; compute in NOT_TERM
-      | [ H: False |- _ ] =>
-        inversion H
-      | [ H: true = true -> False |- _ ] =>
-        assert (Ht: true = true); [reflexivity|];
-        apply H in Ht; inversion Ht
-      end.
-    {
-      inversion Hbb.
-      {
-        subst.
+Proof. bb_inversion_proof fib fib_inversion fib_bb_headers. Qed.
 
-      }
-      {
-
-      }
-  }
-  {
-    inversion Hbb; [ inversion HEADER |]; apply INST in Einst; inversion Einst.
-  }
-  
-  
-Proof. Definition fib_dominator_solution := 
+Definition fib_dominator_solution := 
   << (12%positive, [1%positive; 6%positive; 12%positive])
   ;  (6%positive, [1%positive; 6%positive])
   ;  (17%positive, [1%positive; 17%positive])

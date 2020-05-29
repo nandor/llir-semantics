@@ -147,51 +147,55 @@ Ltac bb_headers_proof func func_inversion :=
     end)|]);
   apply NODE in Einst; inversion Einst.
 
-(*
-Proof.
-  intros header elem Hbb.
-  destruct ((fn_insts fib) ! elem) eqn:Einst.
-  {
-    apply fib_inversion in Einst.
-    repeat destruct Einst as [[Helem Hinst]|Einst];
-      repeat match goal with
-      | [ H: Some _ = Some _ |- _ ] =>
-        inversion H; clear H
-      | [ H: ?e = elem |- ?n = header /\ ?e = elem ] =>
-        split; [clear H0|apply Helem]
-      | [ H: ?e = elem |- (?n = header /\ ?e = elem) \/ _ ] =>
-        left
-      | [ H: ?e = elem |- _ ] =>
-        right
-      | [ H: ?e = elem |- ?e = header ] =>
-        inversion Hbb; clear Hbb;
-        [ auto
-        |
-        ]
-      | [ H: SuccOf fib ?prev elem |- _ ] =>
-        apply get_predecessors_correct in H;
-        rewrite <- Helem in H;
-        simpl in H;
-        repeat destruct H as [Hpred|H]; subst; compute in NOT_TERM
-      | [ H: False |- _ ] =>
-        inversion H
-      | [ H: true = true -> False |- _ ] =>
-        assert (Ht: true = true); [reflexivity|];
-        apply H in Ht; inversion Ht
-      end.
 
-    {
-      inversion Hbb.
-      {
-        subst.
-
-      }
-      {
-
-      }
-  }
-  {
-    inversion Hbb; [ inversion HEADER |]; apply INST in Einst; inversion Einst.
-  }
-Qed.
-*)
+Ltac bb_inversion_proof func func_inversion func_headers :=
+  intros header elem BLOCK;
+  destruct ((fn_insts func) ! elem) eqn:Einst;
+  [ apply func_inversion in Einst;
+    repeat (destruct Einst as [[Helem _]|Einst];
+      [ repeat match goal with
+        | [ H: ?e = elem |- ?n = header /\ ?e = elem ] =>
+          split; [|subst; reflexivity]
+        | [ H: ?e = elem |- (?n = header /\ ?e = elem) \/ _ ] =>
+          left
+        | [ H: ?e = elem |- _ ] =>
+          right
+        end;
+        repeat (inversion BLOCK as
+          [ header' HEADER
+          | header' prev' elem' _ _ BLOCK' PRED NOT_TERM _ _ UNIQ
+          ]; subst;
+          [ match goal with
+            | [ |- ?n = ?n ] =>
+              reflexivity
+            | [ |- _ ] =>
+              apply func_headers in HEADER;
+              repeat destruct HEADER as [HEADER|HEADER];
+              inversion HEADER
+            end
+          | apply get_predecessors_correct in PRED;
+            simpl in PRED;
+            repeat (destruct PRED as [PRED|PRED]; [|inversion PRED]);
+            match goal with
+            | [ H: False |- _ ] => inversion H
+            | [ |- _ ] =>
+              rewrite <- PRED in NOT_TERM;
+              compute in NOT_TERM;
+              match goal with
+              | [ H: true = true -> False |- _ ] =>
+                assert(H': true = true); [reflexivity|]; apply H in H'; inversion H'
+              | [ |- _ ] =>
+                clear BLOCK UNIQ NOT_TERM;
+                rename BLOCK' into BLOCK;
+                rename PRED into Helem;
+                rename prev' into elem
+              end
+            end
+          ])
+    |]);
+    inversion Einst
+  | inversion BLOCK as
+      [ header' [header'' _ _ INST]
+      | header' prev' elem' _ _ _ PRED NOT_TERM INST _ UNIQ
+      ]; apply INST in Einst; inversion Einst
+  ].
