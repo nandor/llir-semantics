@@ -44,6 +44,10 @@ Module Type PARTIAL_MAP.
     forall (A: Type) (B: Type),
       (B -> key -> A -> B) -> t A -> B -> B.
 
+  Parameter filter:
+    forall (V: Type),
+      (key -> V -> bool) -> t V -> t V.
+
   Parameter to_list:
     forall (V: Type),
       t V -> list (key * V).
@@ -51,6 +55,10 @@ Module Type PARTIAL_MAP.
   Parameter values:
     forall (V: Type),
       t V -> list V.
+
+  Parameter keys:
+    forall (V: Type),
+      t V -> list key.
 
   Parameter extract:
     forall (V: Type),
@@ -260,26 +268,26 @@ Module PTrie <: PARTIAL_MAP.
       end.
 
     Lemma map_opt_helper_correct:
-      forall (i: key) (j: key) (t: t A) (a: A),
-        Some a = get t i -> f (append j i) a = get (map_opt_helper t j) i.
+      forall (i: key) (j: key) (t: t A) (a: A) (b: B),
+        Some a = get t i ->
+        Some b = f (append j i) a ->
+        Some b = get (map_opt_helper t j) i.
     Proof.
-      induction i; intros j t a Hget; destruct t; try inversion Hget; simpl.
-      - rewrite append_assoc_1. apply IHi. auto.
-      - rewrite append_assoc_0. apply IHi. auto.
-      - rewrite append_neutral_r. destruct o; inversion Hget. reflexivity.
+      induction i; intros j t a b Hget Heq; destruct t; try inversion Hget; simpl.
+      - apply IHi with (a := a). auto. rewrite <- append_assoc_1. apply Heq.
+      - apply IHi with (a := a). auto. rewrite <- append_assoc_0. apply Heq.
+      - rewrite append_neutral_r in Heq. destruct o; inversion Hget. subst a; auto.
     Qed.
 
     Definition map_opt (a: t A): t B := map_opt_helper a xH.
 
     Theorem map_opt_correct:
-      forall (t: t A) (k: key) (a: A),
-        (Some a = get t k) -> f k a = get (map_opt t) k.
+      forall (t: t A) (k: key) (a: A) (b: B),
+        (Some a = get t k) -> Some b = f k a -> Some b = get (map_opt t) k.
     Proof.
-      intros t k a Hget.
-      generalize (map_opt_helper_correct k xH t Hget). intros H.
-      simpl in H. rewrite H.
-      unfold map_opt.
-      reflexivity.
+      intros t k a b Hget Heq.
+      apply map_opt_helper_correct with (a := a). apply Hget.
+      rewrite append_neutral_l. apply Heq.
     Qed.
 
     Theorem map_opt_inversion:
@@ -288,6 +296,24 @@ Module PTrie <: PARTIAL_MAP.
           exists a, (Some a = get t k /\ Some b = f k a).
     Admitted.
   End MAP_OPT.
+
+  Section FILTER.
+    Variable V: Type.
+    Variable f: key -> V -> bool.
+
+    Definition filter (t: t V) :=
+      map_opt (fun k v => if f k v then Some v else None) t.
+
+    Definition filter_correct:
+      forall (t: t V) (k: key) (v: V),
+        Some v = get t k -> f k v = true -> Some v = get (filter t) k.
+    Proof.
+      intros t k v Hin Hf.
+      unfold filter.
+      apply map_opt_correct with (a := v). apply Hin.
+      rewrite Hf. reflexivity.
+    Qed.
+  End FILTER.
 
   Section MAP.
     Variables A B: Type.
@@ -433,7 +459,7 @@ Module PTrie <: PARTIAL_MAP.
     Variable V: Type.
 
     Definition values (t: t V) :=
-      List.map (fun elem => match elem with (_, v) => v end) (to_list t).
+      List.map snd (to_list t).
 
     Theorem values_correct:
       forall (t: t V) (k: key) (v: V),
@@ -458,10 +484,46 @@ Module PTrie <: PARTIAL_MAP.
       destruct kv.
       exists k.
       apply to_list_correct.
+      simpl in Hl.
       subst v0.
       apply Hr.
     Qed.
   End VALUES.
+
+  Section KEYS.
+    Variable V: Type.
+
+    Definition keys (t: t V) :=
+      List.map fst (to_list t).
+
+    Theorem keys_correct:
+      forall (t: t V) (k: key) (v: V),
+        Some v = get t k -> In k (keys t).
+    Proof.
+      intros t k v.
+      intros Helem.
+      apply in_map_iff.
+      exists (k, v).
+      split. auto.
+      apply to_list_correct.
+      apply Helem.
+    Qed.
+
+    Theorem keys_inversion:
+      forall (t: t V) (k: key),
+        In k (keys t) -> exists (v: V), Some v = get t k.
+    Proof.
+      intros t k Hin.
+      apply in_map_iff in Hin.
+      destruct Hin as [kv [Hl Hr]].
+      destruct kv.
+      exists v.
+      apply to_list_correct.
+      simpl in Hl.
+      subst k0.
+      apply Hr.
+    Qed.
+  End KEYS.
 
   Section EXTRACT.
     Variable V: Type.
@@ -519,7 +581,7 @@ Module PTrie <: PARTIAL_MAP.
       induction a; intros k; simpl.
       try rewrite f_none; reflexivity.
       destruct k; try reflexivity.
-      apply IHa2.
+      apply IHa2.  
       apply IHa1.
     Qed.
 

@@ -164,27 +164,30 @@ Definition Succeeds (i: inst) (succ: node): Prop :=
   | LLBinop _ _ _ _ _ next => next = succ
   end.
 
-Definition Terminator (i: inst): Prop :=
+Definition is_terminator (i: inst): bool :=
   match i with
-  | LLInvoke _ _ _ _ _ => True
-  | LLRet _ => True
-  | LLRetVoid => True
-  | LLJcc _ _ _ => True
-  | LLJmp _ => True
-  | LLLd _ _ _ => False
-  | LLSt _ _ _ => False
-  | LLArg _ _ _ => False
-  | LLInt8 _ _ _ => False
-  | LLInt16 _ _ _ => False
-  | LLInt32 _ _ _ => False
-  | LLInt64 _ _ _ => False
-  | LLFrame _ _ _ => False
-  | LLGlobal _ _ _ => False
-  | LLExtern _ _ => False
-  | LLUndef _ _ _ => False
-  | LLUnop _ _ _ _ _ => False
-  | LLBinop _ _ _ _ _ _ => False
+  | LLInvoke _ _ _ _ _ => true
+  | LLRet _ => true
+  | LLRetVoid => true
+  | LLJcc _ _ _ => true
+  | LLJmp _ => true
+  | LLLd _ _ _ => false
+  | LLSt _ _ _ => false
+  | LLArg _ _ _ => false
+  | LLInt8 _ _ _ => false
+  | LLInt16 _ _ _ => false
+  | LLInt32 _ _ _ => false
+  | LLInt64 _ _ _ => false
+  | LLFrame _ _ _ => false
+  | LLGlobal _ _ _ => false
+  | LLExtern _ _ => false
+  | LLUndef _ _ _ => false
+  | LLUnop _ _ _ _ _ => false
+  | LLBinop _ _ _ _ _ _ => false
   end.
+
+Definition Terminator (i: inst): Prop :=
+  is_terminator i = true.
 
 Section FUNCTION.
   Variable f: func.
@@ -202,9 +205,9 @@ Section FUNCTION.
     end.
 
   Definition SuccOf (n: node) (m: node): Prop :=
-    match f.(fn_insts) ! n with
-    | None => False
-    | Some inst => Succeeds inst m
+    match f.(fn_insts) ! n, f.(fn_insts) ! m with
+    | Some inst, Some _ => Succeeds inst m
+    | _, _ => False
     end.
 
   Definition TermAt (n: node): Prop :=
@@ -253,52 +256,101 @@ Proof.
     intros Hsucc.
     unfold Succeeds in Hsucc.
     unfold get_successors.
-    destruct i; try destruct exn; 
+    destruct i; try destruct exn;
     try destruct Hsucc; try inversion H; subst; simpl; auto.
   }
 Qed.
 
 Definition get_predecessors (f: func) (n: node) :=
-  PTrie.values 
-    (PTrie.map_opt (fun k v => 
-      let succs := get_successors v in
-      if List.existsb (fun succ => Pos.eqb succ n) succs then Some k else None
-    ) f.(fn_insts)).
+  match f.(fn_insts) ! n with
+  | None => []
+  | Some _ =>
+    PTrie.keys
+      (PTrie.filter (fun k v =>
+        let succs := get_successors v in
+        List.existsb (fun succ => Pos.eqb succ n) succs
+      ) f.(fn_insts))
+  end.
 
 Lemma get_predecessors_correct:
   forall (f: func) (n: node) (pred: node),
-    In pred (get_predecessors f n) -> SuccOf f pred n.
+    In pred (get_predecessors f n) <-> SuccOf f pred n.
 Proof.
   intros f n pred.
-  intros Hin.
-  unfold get_predecessors in Hin. unfold SuccOf. unfold Succeeds.
-  apply PTrie.values_inversion in Hin.
-  destruct Hin as [k Hin].
-  apply PTrie.map_opt_inversion in Hin.
-  destruct Hin as [inst [Hinst Hpred]].
-  unfold get_successors in Hpred. unfold existsb in Hpred.
-  destruct inst; repeat match goal with
-    | [ H: Pos.eqb ?v n = false |- _ ] =>
-      clear H;
-      simpl in *
-    | [ H: Pos.eqb ?v n = true |- _ ] =>
-      apply Pos.eqb_eq in H;
-      subst n; 
-      simpl in Hpred;
-      inversion Hpred;
-      subst pred;
-      rewrite <- Hinst;
-      auto
-    | [ H: context [ Pos.eqb ?v n ] |- _ ] =>
-      destruct (Pos.eqb v n) eqn:E
-    | [ H: Some ?v = None |- _ ] =>
-      inversion H
-    | [ H: context [ LLInvoke _ _ _ _ ?exn ] |- _ ] =>
-      match exn with
-      | context [ None ] => simpl
-      | context [ Some ] => simpl
-      | _ => destruct exn
-      end
-    end.
+  split.
+  {
+    intros Hin.
+    unfold get_predecessors in Hin. unfold SuccOf. unfold Succeeds.
+    destruct ((fn_insts f) ! n) eqn:Einst.
+    {
+      apply PTrie.keys_inversion in Hin.
+      destruct Hin as [k Hin].
+      apply PTrie.map_opt_inversion in Hin.
+      destruct Hin as [inst [Hinst Hpred]].
+      rewrite <- Hinst.
+      unfold get_successors in Hpred. unfold existsb in Hpred.
+      destruct inst; repeat match goal with
+        | [ H: Pos.eqb ?v n = false |- _ ] =>
+          clear H;
+          simpl in *
+        | [ H: Pos.eqb ?v n = true |- _ ] =>
+          apply Pos.eqb_eq in H;
+          subst n;
+          simpl in Hpred;
+          inversion Hpred;
+          auto
+        | [ H: context [ Pos.eqb ?v n ] |- _ ] =>
+          destruct (Pos.eqb v n) eqn:E
+        | [ H: Some ?v = None |- _ ] =>
+          inversion H
+        | [ H: context [ LLInvoke _ _ _ _ ?exn ] |- _ ] =>
+          match exn with
+          | context [ None ] => simpl
+          | context [ Some ] => simpl
+          | _ => destruct exn
+          end
+        end.
+    }
+    {
+      inversion Hin.
+    }
+  }
+  {
+    intros Hsucc.
+    unfold SuccOf in Hsucc.
+    destruct ((fn_insts f) ! pred) as [inst|] eqn:Epred.
+    {
+      destruct ((fn_insts f) ! n) as [inst'|] eqn:En.
+      {
+        unfold Succeeds in Hsucc.
+        unfold get_predecessors.
+        rewrite En.
+        destruct inst; try destruct exn; repeat match goal with
+        | [ H: _ \/ _ |- _ ] =>
+          destruct H
+        | [ H: Some _ = Some _ |- _ ] =>
+          inversion H; clear H
+        | [ H: ?next = n |- _ ] =>
+          apply PTrie.values_correct with (k := next)
+        | [ H: (fn_insts f) ! pred = Some ?inst |- _ ] =>
+          apply PTrie.keys_correct with (v := inst);
+          apply PTrie.filter_correct;
+            [ symmetry; apply Epred
+            | apply List.existsb_exists; exists n;
+              split;
+              [ simpl; auto
+              | apply Pos.eqb_refl
+              ]
+            ]
+        end.
+        inversion H.
+      }
+      {
+        inversion Hsucc.
+      }
+    }
+    {
+      inversion Hsucc.
+    }
+  }
 Qed.
-

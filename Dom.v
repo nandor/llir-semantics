@@ -333,23 +333,31 @@ Section FUNCTION.
     reflexivity.
   Qed.
 
-  Inductive BasicBlock: node -> node -> Prop :=
+  Inductive BlockHeader: node -> Prop :=
     | block_header:
       forall (header: node)
         (REACH: Reachable header)
         (TERM: forall (term: node), SuccOf f term header -> TermAt f term)
-        (NODE: f.(fn_insts) ! header <> None),
-        BasicBlock header header
-    | block_elem:
+        (INST: f.(fn_insts) ! header <> None),
+        BlockHeader header
+    .
+
+  Inductive BasicBlock: node -> node -> Prop :=
+    | bb_header:
+      forall (header: node)
+        (HEADER: BlockHeader header),
+          BasicBlock header header
+    | bb_elem:
       forall (header: node) (prev: node) (elem: node)
         (NOT_HEADER: header <> elem)
         (NOT_ENTRY: entry <> elem)
         (BLOCK: BasicBlock header prev)
         (PRED: SuccOf f prev elem)
-        (NODE: f.(fn_insts) ! header <> None)
-        (NOPHI: f.(fn_phis) ! elem = None)
+        (NOT_TERM: ~TermAt f prev)
+        (INST: f.(fn_insts) ! elem <> None)
+        (NO_PHI: f.(fn_phis) ! elem = None)
         (UNIQ: forall (prev': node), SuccOf f prev' elem -> prev' = prev),
-        BasicBlock header elem
+          BasicBlock header elem
     .
 
   Theorem bb_reaches:
@@ -357,8 +365,20 @@ Section FUNCTION.
       BasicBlock header elem -> Reachable elem.
   Proof.
     intros header elem Hbb.
-    induction Hbb. apply REACH.
+    induction Hbb.
+    inversion HEADER.
+    apply REACH.
     apply reach_succ with (a := prev); auto.
+  Qed.
+
+  Theorem bb_has_header:
+    forall (header: node) (elem: node),
+      BasicBlock header elem -> BlockHeader header.
+  Proof.
+    intros header elem Hbb.
+    induction Hbb.
+    apply HEADER.
+    apply IHHbb.
   Qed.
 
   Theorem bb_header_dom_nodes:
@@ -376,6 +396,41 @@ Section FUNCTION.
     + intros n Hsucc. symmetry. apply UNIQ. apply Hsucc.
   Qed.
 
+  Theorem bb_header_unique:
+    forall (elem: node) (header: node) (header': node),
+      BasicBlock header elem ->
+      BasicBlock header' elem ->
+      header = header'.
+  Proof.
+    intros elem header header'.
+    intros Hbb Hbb'.
+    induction Hbb'.
+    {
+      inversion Hbb; auto.
+      inversion HEADER.
+      apply TERM in PRED.
+      apply NOT_TERM in PRED.
+      inversion PRED.
+    }
+    {
+      apply IHHbb'.
+      inversion Hbb.
+      {
+        subst.
+        inversion HEADER.
+        apply TERM in PRED.
+        apply NOT_TERM in PRED.
+        inversion PRED.
+      }
+      {
+        subst.
+        apply UNIQ in PRED0.
+        subst prev0.
+        apply BLOCK.
+      }
+    }
+  Qed.
+
   Inductive BasicBlockSucc: node -> node -> Prop :=
     | basic_block_succ:
       forall (from: node) (to: node) (term: node)
@@ -384,7 +439,6 @@ Section FUNCTION.
         (SUCC: SuccOf f term to),
         BasicBlockSucc from to
     .
-
 End FUNCTION.
 
 Lemma eq_cfg_dom:

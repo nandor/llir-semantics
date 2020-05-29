@@ -157,98 +157,115 @@ Proof. used_at_inversion_proof fib fib_inversion. Qed.
 Theorem fib_defs_are_unique: defs_are_unique fib.
 Proof. defs_are_unique_proof fib_defined_at_inversion. Qed.
 
-Theorem fib_reach_1: Reachable fib 1%positive. Proof. apply reach_entry. Qed.
-Theorem fib_reach_2: Reachable fib 2%positive. Proof. reach_pred_step fib 1%positive. apply fib_reach_1. Qed.
-Theorem fib_reach_3: Reachable fib 3%positive. Proof. reach_pred_step fib 2%positive. apply fib_reach_2. Qed.
-Theorem fib_reach_4: Reachable fib 4%positive. Proof. reach_pred_step fib 3%positive. apply fib_reach_3. Qed.
-Theorem fib_reach_5: Reachable fib 5%positive. Proof. reach_pred_step fib 4%positive. apply fib_reach_4. Qed.
-Theorem fib_reach_6: Reachable fib 6%positive. Proof. reach_pred_step fib 5%positive. apply fib_reach_5. Qed.
-Theorem fib_reach_7: Reachable fib 7%positive. Proof. reach_pred_step fib 6%positive. apply fib_reach_6. Qed.
-Theorem fib_reach_8: Reachable fib 8%positive. Proof. reach_pred_step fib 7%positive. apply fib_reach_7. Qed.
-Theorem fib_reach_12: Reachable fib 12%positive. Proof. reach_pred_step fib 8%positive. apply fib_reach_8. Qed.
-Theorem fib_reach_13: Reachable fib 13%positive. Proof. reach_pred_step fib 12%positive. apply fib_reach_12. Qed.
-Theorem fib_reach_14: Reachable fib 14%positive. Proof. reach_pred_step fib 13%positive. apply fib_reach_13. Qed.
-Theorem fib_reach_15: Reachable fib 15%positive. Proof. reach_pred_step fib 14%positive. apply fib_reach_14. Qed.
-Theorem fib_reach_17: Reachable fib 17%positive. Proof. reach_pred_step fib 15%positive. apply fib_reach_15. Qed.
-
-Theorem fib_bb_1: BasicBlock fib 1%positive 1%positive.
-Proof.
-  block_header_proof fib fib_inversion fib_reach_1.
-Qed.
-
-Theorem fib_bb_2: BasicBlock fib 1%positive 2%positive.
-Proof.
-  block_elem_proof fib fib_inversion 1%positive fib_bb_1.
-Qed.
-
-Theorem fib_bb_3: BasicBlock fib 1%positive 3%positive.
-Proof.
-  block_elem_proof fib fib_inversion 2%positive fib_bb_2.
-Qed.
-
-Theorem fib_bb_4: BasicBlock fib 1%positive 4%positive.
-Proof.
-  block_elem_proof fib fib_inversion 3%positive fib_bb_3.
-Qed.
-
-Theorem fib_bb_5: BasicBlock fib 1%positive 5%positive.
-Proof.
-  block_elem_proof fib fib_inversion 4%positive fib_bb_4.
-Qed.
-
-Theorem fib_bb_6: BasicBlock fib 6%positive 6%positive.
-Proof.
-  block_header_proof fib fib_inversion fib_reach_6.
-Qed.
-
-Theorem fib_bb_7: BasicBlock fib 6%positive 7%positive.
-Proof.
-  block_elem_proof fib fib_inversion 6%positive fib_bb_6.
-Qed.
-
-Theorem fib_bb_8: BasicBlock fib 6%positive 8%positive.
-Proof.
-  block_elem_proof fib fib_inversion 7%positive fib_bb_7.
-Qed.
-
-Theorem fib_bb_12: BasicBlock fib 12%positive 12%positive.
-Proof.
-  block_header_proof fib fib_inversion fib_reach_12.
-Qed.
-
-Theorem fib_bb_13: BasicBlock fib 12%positive 13%positive.
-Proof.
-  block_elem_proof fib fib_inversion 12%positive fib_bb_12.
-Qed.
-
-Theorem fib_bb_14: BasicBlock fib 12%positive 14%positive.
-Proof.
-  block_elem_proof fib fib_inversion 13%positive fib_bb_13.
-Qed.
-
-Theorem fib_bb_15: BasicBlock fib 12%positive 15%positive.
-Proof.
-  block_elem_proof fib fib_inversion 14%positive fib_bb_14.
-Qed.
-
-Theorem fib_bb_17: BasicBlock fib 17%positive 17%positive.
-Proof.
-  block_header_proof fib fib_inversion fib_reach_17.
-Qed.
-
+Ltac bb_headers_proof func func_inversion :=
+  intros header Hbb;
+  inversion Hbb as [header'' REACH TERM NODE];
+  remember ((fn_insts func) ! header) as inst eqn:Einst;
+  remember (get_predecessors func header) as pred eqn:Epred;
+  symmetry in Einst;
+  apply func_inversion in Einst;
+  repeat (destruct Einst as [[Ehdr Ei]|Einst]; [auto; (
+    rewrite <- Ehdr in Epred;
+    compute in Epred;
+    match goal with
+    | [ E: pred = [ ?p ] |- _ ] =>
+      assert (Hsucc: SuccOf func p header);
+      subst header;
+      compute;
+      auto;
+      apply TERM in Hsucc;
+      compute in Hsucc;
+      inversion Hsucc
+    end)|]);
+  apply NODE in Einst; inversion Einst.
+  
 Theorem fib_bb_headers: 
   forall (header: node), 
-    BasicBlock fib header header ->
-      header = 1%positive
+    BlockHeader fib header ->
+      1%positive = header
       \/
-      header = 6%positive
+      6%positive = header
       \/
-      header = 12%positive
+      12%positive = header
       \/
-      header = 17%positive.
+      17%positive = header.
 Proof. bb_headers_proof fib fib_inversion. Qed.
 
-Definition fib_dominator_solution := 
+Theorem fib_bb_inversion: 
+  forall (header: node) (elem: node),
+    BasicBlock fib header elem ->
+      1%positive = header /\ 1%positive = elem
+      \/
+      1%positive = header /\ 2%positive = elem
+      \/
+      1%positive = header /\ 3%positive = elem
+      \/
+      1%positive = header /\ 4%positive = elem
+      \/
+      1%positive = header /\ 5%positive = elem
+      \/
+      6%positive = header /\ 6%positive = elem
+      \/
+      6%positive = header /\ 7%positive = elem
+      \/
+      6%positive = header /\ 8%positive = elem
+      \/
+      12%positive = header /\ 12%positive = elem
+      \/
+      12%positive = header /\ 13%positive = elem
+      \/
+      12%positive = header /\ 14%positive = elem
+      \/
+      12%positive = header /\ 15%positive = elem
+      \/
+      17%positive = header /\ 17%positive = elem.
+Proof.
+  intros header elem Hbb.
+  destruct ((fn_insts fib) ! elem) eqn:Einst.
+  {
+    apply fib_inversion in Einst.
+    repeat destruct Einst as [[Helem Hinst]|Einst];
+      repeat match goal with
+      | [ H: Some _ = Some _ |- _ ] =>
+        inversion H; clear H
+      | [ H: ?e = elem |- ?n = header /\ ?e = elem ] =>
+        split; [clear H0|apply Helem]
+      | [ H: ?e = elem |- (?n = header /\ ?e = elem) \/ _ ] =>
+        left
+      | [ H: ?e = elem |- _ ] =>
+        right
+      | [ H: ?e = elem |- ?e = header ] =>
+        inversion Hbb; clear Hbb;
+        [ auto
+        |
+        ]
+      | [ H: SuccOf fib ?prev elem |- _ ] =>
+        apply get_predecessors_correct in H;
+        rewrite <- Helem in H;
+        simpl in H;
+        repeat destruct H as [Hpred|H]; subst; compute in NOT_TERM
+      | [ H: False |- _ ] =>
+        inversion H
+      | [ H: true = true -> False |- _ ] =>
+        assert (Ht: true = true); [reflexivity|];
+        apply H in Ht; inversion Ht
+      end.
+    {
+      inversion Hbb.
+      {
+        subst.
+
+      }
+      {
+
+      }
+  }
+  {
+    inversion Hbb; [ inversion HEADER |]; apply INST in Einst; inversion Einst.
+  }
+  
+  
+Proof. Definition fib_dominator_solution := 
   << (12%positive, [1%positive; 6%positive; 12%positive])
   ;  (6%positive, [1%positive; 6%positive])
   ;  (17%positive, [1%positive; 17%positive])

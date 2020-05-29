@@ -96,7 +96,7 @@ Ltac reach_pred_step func pred :=
   ].
 
 Ltac block_elem_proof func func_inv p proof_prev :=
-  apply block_elem with (prev := p);
+  apply bb_elem with (prev := p);
   [ intro contra; inversion contra
   | intro contra; inversion contra
   | apply proof_prev
@@ -125,31 +125,73 @@ Ltac block_header_proof func func_inv bb_reach :=
   | intros contra; inversion contra
   ].
 
-
 Ltac bb_headers_proof func func_inversion :=
   intros header Hbb;
-  inversion Hbb as
-    [ header' REACH TERM NODE H' H
-    | header' prev elem NOT_HEADER NOT_ENTRY BLOCK PRED NODE NOPHI UNIQ H' H
-    ];
-  [
-    remember ((fn_insts func) ! header) as inst eqn:Einst;
-    remember (get_predecessors func header) as pred eqn:Epred;
-    symmetry in Einst;
-    apply func_inversion in Einst;
-    repeat (destruct Einst as [[Ehdr Ei]|Einst]; [auto; (
-      rewrite <- Ehdr in Epred;
-      compute in Epred;
-      match goal with
-      | [ E: pred = [ ?p ] |- _ ] =>
-        assert (Hsucc: SuccOf func p header);
-        subst header;
-        compute;
-        auto;
-        apply TERM in Hsucc;
-        compute in Hsucc;
-        inversion Hsucc
-      end)|]);
-    apply NODE in Einst; inversion Einst
-  | assert (Hh: header = header); [reflexivity|]; apply NOT_HEADER in Hh; inversion Hh
-  ].
+  inversion Hbb as [header'' REACH TERM NODE];
+  remember ((fn_insts func) ! header) as inst eqn:Einst;
+  remember (get_predecessors func header) as pred eqn:Epred;
+  symmetry in Einst;
+  apply func_inversion in Einst;
+  repeat (destruct Einst as [[Ehdr Ei]|Einst]; [auto; (
+    rewrite <- Ehdr in Epred;
+    compute in Epred;
+    match goal with
+    | [ E: pred = [ ?p ] |- _ ] =>
+      assert (Hsucc: SuccOf func p header);
+      subst header;
+      compute;
+      auto;
+      apply TERM in Hsucc;
+      compute in Hsucc;
+      inversion Hsucc
+    end)|]);
+  apply NODE in Einst; inversion Einst.
+
+(*
+Proof.
+  intros header elem Hbb.
+  destruct ((fn_insts fib) ! elem) eqn:Einst.
+  {
+    apply fib_inversion in Einst.
+    repeat destruct Einst as [[Helem Hinst]|Einst];
+      repeat match goal with
+      | [ H: Some _ = Some _ |- _ ] =>
+        inversion H; clear H
+      | [ H: ?e = elem |- ?n = header /\ ?e = elem ] =>
+        split; [clear H0|apply Helem]
+      | [ H: ?e = elem |- (?n = header /\ ?e = elem) \/ _ ] =>
+        left
+      | [ H: ?e = elem |- _ ] =>
+        right
+      | [ H: ?e = elem |- ?e = header ] =>
+        inversion Hbb; clear Hbb;
+        [ auto
+        |
+        ]
+      | [ H: SuccOf fib ?prev elem |- _ ] =>
+        apply get_predecessors_correct in H;
+        rewrite <- Helem in H;
+        simpl in H;
+        repeat destruct H as [Hpred|H]; subst; compute in NOT_TERM
+      | [ H: False |- _ ] =>
+        inversion H
+      | [ H: true = true -> False |- _ ] =>
+        assert (Ht: true = true); [reflexivity|];
+        apply H in Ht; inversion Ht
+      end.
+
+    {
+      inversion Hbb.
+      {
+        subst.
+
+      }
+      {
+
+      }
+  }
+  {
+    inversion Hbb; [ inversion HEADER |]; apply INST in Einst; inversion Einst.
+  }
+Qed.
+*)

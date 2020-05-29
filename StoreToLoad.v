@@ -291,10 +291,12 @@ Section PROPAGATE_PROPERTIES.
       unfold SuccOf in *.
       simpl.
       rewrite PTrie.map_get.
-      destruct ((fn_insts f) ! src); try inversion Hsucc.
+      rewrite PTrie.map_get.
+      destruct ((fn_insts f) ! src) as [inst|]; try inversion Hsucc.
+      destruct ((fn_insts f) ! dst) as [inst'|]; try inversion Hsucc.
       unfold rewrite_uses. simpl.
       unfold Succeeds in *.
-      destruct i; subst; auto.
+      destruct inst; subst; auto.
     }
     {
       intros Hsucc.
@@ -304,10 +306,12 @@ Section PROPAGATE_PROPERTIES.
       unfold SuccOf in *.
       simpl in Hsucc.
       rewrite PTrie.map_get in Hsucc.
-      destruct ((fn_insts f) ! src); try inversion Hsucc.
+      rewrite PTrie.map_get in Hsucc.
+      destruct ((fn_insts f) ! src) as [inst|]; try inversion Hsucc.
+      destruct ((fn_insts f) ! dst) as [inst'|]; try inversion Hsucc.
       simpl in Hsucc.
       unfold Succeeds in *.
-      destruct i; subst; auto.
+      destruct inst; subst; auto.
     }
   Qed.
 
