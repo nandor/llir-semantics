@@ -4,6 +4,7 @@
 
 Require Import Coq.ZArith.ZArith.
 Require Import Coq.Lists.List.
+Require Import Coq.Program.Equality.
 
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
@@ -199,3 +200,124 @@ Ltac bb_inversion_proof func func_inversion func_headers :=
       | header' prev' elem' _ _ _ PRED NOT_TERM INST _ UNIQ
       ]; apply INST in Einst; inversion Einst
   ].
+
+Ltac bb_succ_inversion_proof bb_headers bb_inversion :=
+  intros from to [from' to' term HDR_FROM HDR_TO SUCC];
+  apply bb_headers in HDR_TO;
+  apply bb_inversion in HDR_FROM;
+  repeat destruct HDR_FROM as [HDR_FROM|HDR_FROM];
+  repeat destruct HDR_TO as [HDR_TO|HDR_TO];
+  destruct HDR_FROM as [Hfrom Htem];
+  subst; compute in SUCC;
+  try destruct SUCC as [SUCC|SUCC];
+  inversion SUCC; auto; repeat (right; auto).
+
+Definition dominator_solution_correct fn doms :=
+  Some [fn.(fn_entry)] = doms ! (fn.(fn_entry))
+  /\
+  forall (n: node),
+    BasicBlockHeader fn n ->
+      exists (doms_n: list node),
+        Some doms_n = doms ! n
+        /\
+        In n doms_n
+        /\
+        forall (n': node),
+          In n' doms_n ->
+            n = n'
+            \/
+            forall (pred: node),
+              BasicBlockSucc fn pred n ->
+                exists (doms_pred: list node),
+                  Some doms_pred = doms ! pred
+                  /\
+                  In n' doms_pred.
+
+Ltac dominator_solution_proof func solution func_bb_headers func_bb_succ_inversion :=
+  split; [ compute; reflexivity | ];
+  intros n Hbb;
+  apply func_bb_headers in Hbb;
+  repeat destruct Hbb as [Hbb|Hbb];
+    remember (solution ! n) as some_doms_n eqn:Edoms_n;
+    compute in Edoms_n; subst n;
+    match goal with
+    | [ H: some_doms_n = Some ?doms_n |- _ ] => exists doms_n
+    end;
+    (repeat split; [auto|compute; auto|]);
+    intros n' Hin;
+    repeat destruct Hin as [Hin|Hin]; auto;
+    right;
+    intros pred Hpred;
+    apply func_bb_succ_inversion in Hpred;
+    repeat destruct Hpred as [Hpred|Hpred];
+    destruct Hpred as [Hl Hr];
+    try inversion Hr;
+    remember (solution ! pred) as some_doms_pred eqn:Edoms_pred;
+    rewrite <- Hl in Edoms_pred;
+    compute in Edoms_pred;
+    match goal with
+    | [ H: some_doms_pred = Some ?doms_n |- _ ] => exists doms_n
+    end;
+    subst some_doms_pred; (split; [reflexivity|]); subst; simpl; auto.
+
+Definition dominator_solution_dom fn doms :=
+  forall (n: node) (m: node),
+    BasicBlockHeader fn n ->
+    BasicBlockHeader fn m ->
+    (exists (doms_n: list node), Some doms_n = doms ! n /\ In m doms_n) ->
+    BasicBlockDominates fn m n.
+
+Theorem correct_implies_dom:
+  forall (f: func) (sol: PTrie.t (list node)),
+    dominator_solution_correct f sol -> dominator_solution_dom f sol.
+Proof.
+  intros f sol Hcorrect n m Hbbn Hbbm Hin.
+  destruct Hcorrect as [Hentry Hheaders].
+  apply bb_dom_path.
+  {
+    intros path Hpath.
+    remember (entry f) as entry.
+    induction Hpath.
+    {
+      generalize (Hheaders n Hbbn).
+      intros [doms_n' [Hdoms_n' [Hin' Hpred]]].
+      destruct Hin as [doms_n [Hdoms_n Hin]].
+      rewrite <- Hdoms_n' in Hdoms_n.
+      inversion Hdoms_n.
+      subst n doms_n'.
+      unfold entry in *.
+      inversion Hentry as [Hentry_explicit].
+      rewrite <- Hdoms_n' in Hentry_explicit.
+      inversion Hentry_explicit as [Hdoms_n_explicit].
+      subst doms_n.
+      intuition.
+    }
+    {
+      assert (Hbb_next: BasicBlockHeader f next).
+      {
+        inversion HD.
+        apply bb_has_header with (elem := term).
+        apply HDR_FROM.
+      }
+      destruct (Pos.eq_dec to m) as [Eeq|Ene]. left. auto.
+      right. apply IHHpath; auto.
+      {
+        destruct Hin as [doms_n' [Hdoms_n' Hin_m_doms_n]].
+        generalize (Hheaders to Hbbn). intros Hdoms_next.
+        destruct Hdoms_next as [doms_next [Hdoms_next [Hin_next Hpred_next]]].
+        rewrite <- Hdoms_next in Hdoms_n'.
+        inversion Hdoms_n'. subst doms_n'.
+
+        generalize (Hpred_next m Hin_m_doms_n). intros Hm.
+        destruct Hm. contradiction.
+
+        generalize (H next HD). intros Hpred.
+        destruct Hpred as [doms_pred [Hdoms_pred Hin_pred]].
+        exists doms_pred. split; auto.
+      }
+    }
+  }
+  {
+    inversion Hbbn. apply REACH.
+  }
+Qed.

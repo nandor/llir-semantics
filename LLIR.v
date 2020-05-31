@@ -120,6 +120,11 @@ Definition Defs (i: inst) (r: reg): Prop :=
   | LLBinop _ _ _ _ dst _ => dst = r
   end.
 
+Definition PhiDefs (i: phi) (r: reg): Prop :=
+  match i with
+  | LLPhi _ dst => r = dst
+  end.
+
 Definition Uses (i: inst) (r: reg): Prop :=
   match i with
   | LLLd addr _ _ => addr = r
@@ -196,6 +201,12 @@ Section FUNCTION.
     match f.(fn_insts) ! n with
     | None => False
     | Some inst => Defs inst r
+    end.
+
+  Definition PhiDefinedAt (n: node) (r: reg): Prop :=
+    match f.(fn_phis) ! n with
+    | None => False
+    | Some phis => Exists (fun phi => PhiDefs phi r) phis
     end.
 
   Definition UsedAt (n: node) (r: reg): Prop :=

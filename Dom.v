@@ -54,113 +54,135 @@ Section FUNCTION.
     | path_nil:
       forall (n: node)
         (REACH: Reachable n),
-        Path n [] n
+        Path n [n] n
     | path_cons:
       forall (from: node) (next: node) (to: node) (p: list node)
         (REACH: Reachable from)
-        (HD: SuccOf f from next)
-        (TL: Path next p to),
-        Path from (from :: p) to
+        (TL: Path from p next)
+        (HD: SuccOf f next to),
+        Path from (to :: p) to
     .
 
-  Theorem path_app:
-    forall (xy: list node) (yz: list node) (x: node) (y: node) (z: node),
-      Path x xy y ->
-      Path y yz z ->
-      Path x (xy ++ yz) z.
+  Theorem path_reaches_start:
+    forall (x: node) (path: list node) (y: node),
+      Path x path y -> Reachable x.
   Proof.
-    induction xy; intros yz x y z Hxy Hyz.
-    - simpl. inversion Hxy. apply Hyz.
+    intros x path y Hpath.
+    inversion Hpath; apply REACH.
+  Qed.
+
+  Theorem path_reaches_end:
+    forall (x: node) (path: list node) (y: node),
+      Path x path y -> Reachable y.
+  Proof.
+    intros x path y Hpath.
+    induction Hpath. apply REACH.
+    subst. apply (reach_succ next). apply HD. apply IHHpath.
+  Qed.
+
+  Theorem start_in_path:
+    forall (x: node) (path: list node) (y: node),
+      Path x path y -> In x path.
+  Proof.
+    intros x path y Hpath.
+    induction Hpath; intuition.
+  Qed.
+
+  Theorem last_in_path:
+    forall (x: node) (path: list node) (y: node),
+      Path x path y -> In y path.
+  Proof.
+    intros x path y Hpath.
+    inversion Hpath; left; auto.
+  Qed.
+
+  Theorem path_app:
+    forall (zy: list node) (yx: list node) (x: node) (y: node) (z: node),
+      Path x (y::yx) y ->
+      Path y zy z ->
+      Path x (zy ++ yx) z.
+  Proof.
+    induction zy; intros yx x y z Hxy Hyz.
+    - simpl. inversion Hyz; subst.
     - rewrite <- app_comm_cons.
-      inversion Hxy.
-      apply (path_cons a next). apply REACH. apply HD.
-      apply (IHxy yz next y z). apply TL. apply Hyz.
+      inversion Hyz; subst.
+      + simpl. apply Hxy.
+      + apply (path_cons x next).
+        * apply (path_reaches_start x (y::yx) y Hxy).
+        * apply (IHzy yx x y next Hxy).
+          inversion Hyz; subst; apply TL.
+        * apply HD.
   Qed.
 
   Theorem path_app_inv:
-    forall (xy: list node) (yz: list node) (x: node) (z: node),
-      Path x (xy ++ yz) z ->
-        exists (y: node), Path x xy y /\ Path y yz z.
+    forall (zy: list node) (yx: list node) (x: node) (y: node) (z: node),
+      Path x (zy ++ [y] ++ yx) z ->
+      Path x (y::yx) y /\ Path y (zy ++ [y]) z.
   Proof.
-    induction xy; intros yz x z Hpath.
+    induction zy; intros yx x y z Hpath.
     {
-      exists x.
-      split.
-      + apply path_nil. inversion Hpath; apply REACH.
-      + simpl in Hpath. apply Hpath.
+      simpl in Hpath.
+      split; inversion Hpath; subst.
+      + apply path_nil. apply REACH.
+      + apply Hpath.
+      + simpl. apply Hpath.
+      + simpl. apply path_nil.
+        apply (path_reaches_end x (z :: yx) z Hpath).
     }
     {
-      inversion Hpath.
-      subst to a from.
-      generalize (IHxy yz next z TL). intros Hind.
-      destruct Hind as [y [Hl Hr]].
-      exists y.
-      split.
+      inversion Hpath; subst.
       {
+        assert (Hcontra: [] <> zy ++ y :: yx).
+        {
+          destruct zy; intros contra; simpl.
+          + simpl in contra. inversion contra.
+          + inversion contra.
+        }
+        apply Hcontra in H2; inversion H2.
+      }
+      {
+        assert (y :: yx = [y] ++ yx). auto.
+        rewrite H in TL.
+        generalize (IHzy yx x y next TL). intros Hind.
+        destruct Hind as [Hl Hr].
+        split. apply Hl.
         apply path_cons with (next := next).
-        + apply REACH.
+        + apply (path_reaches_end x (y :: yx) y Hl).
+        + apply Hr.
         + apply HD.
-        + apply Hl.
-      }
-      {
-        apply Hr.
       }
     }
-  Qed.
-
-  Theorem path_last:
-    forall (n: node) (m: node) (nm: list node),
-      n <> m -> Path n nm m ->
-        exists (p: node) (np: list node),
-          nm = np ++ [p] /\ Path n np p /\ SuccOf f p m.
-  Proof.
-    intros n m nm Hne Hpath.
-    inversion Hpath. apply Hne in H1. inversion H1.
-    assert (Hneq: n :: p <> []). intros contra. inversion contra.
-    generalize (List.exists_last Hneq). intros Hlast.
-    destruct Hlast as [path' [p' Hlast]].
-    exists p'. exists path'.
-    assert (Hpath': Path n (path' ++ [p']) m).
-    { rewrite <- Hlast. rewrite H0. apply Hpath. }
-    generalize (path_app_inv path' [p'] n m Hpath'). intros Hstep.
-    destruct Hstep as [y [Hl Hr]].
-    inversion Hr.
-    subst y from from0 to to0 p0.
-    repeat split.
-    - apply Hlast.
-    - apply Hl.
-    - inversion TL0. subst next0 n0. apply HD0.
   Qed.
 
   Theorem path_next:
     forall (n: node) (m: node),
       Closure n m -> Reachable n -> exists p, Path n p m.
   Proof.
-    intros n m.
-    intros Hsucc.
+    intros n m Hsucc HreachX.
     induction Hsucc.
     {
-      intros Hreach.
-      exists nil.
-      apply path_nil.
-      apply Hreach.
-    }
-    {
-      intros Hreach.
       exists [x].
-      apply (path_cons x y y). apply Hreach. apply STEP. apply path_nil.
-      apply (reach_succ x). apply STEP. apply Hreach.
+      apply path_nil.
+      apply HreachX.
     }
     {
-      intros HreachX.
+      exists [y;x].
+      apply (path_cons x x y).
+      - apply HreachX.
+      - apply path_nil. apply HreachX.
+      - apply STEP.
+    }
+    {
       assert (HreachY: Reachable y).
       { apply (reachable_closure x). apply HreachX. apply Hsucc1. }
       apply IHHsucc1 in HreachX.
       apply IHHsucc2 in HreachY.
       destruct HreachX.
       destruct HreachY.
-      exists (x0 ++ x1).
-      apply (path_app x0 x1 x y z). apply H. apply H0.
+      inversion H; subst.
+      + exists x1. apply H0.
+      + exists (x1 ++ p).
+        apply path_app with (y := y). apply H. apply H0.
     }
   Qed.
 
@@ -168,8 +190,7 @@ Section FUNCTION.
     forall (n: node),
       Reachable n -> exists p, Path entry p n.
   Proof.
-    intros n.
-    intros Hreach.
+    intros n Hreach.
     apply path_next.
     {
       induction Hreach.
@@ -208,15 +229,14 @@ Section FUNCTION.
     intro Hreach.
     destruct (Pos.eq_dec n entry).
     + rewrite e. apply dom_self.
-    + inversion Hreach.
-      - rewrite <- H in n0. destruct n0; reflexivity.
+    + inversion Hreach; subst.
+      - contradiction.
       - apply dom_path.
         {
-          intros p.
-          intro Hpath.
-          inversion Hpath.
-          + rewrite H2 in n0. destruct n0. reflexivity.
-          + simpl. auto.
+          intros p Hpath.
+          inversion Hpath; subst.
+          + contradiction.
+          + right. apply start_in_path with (y := next). apply TL0.
         }
         {
           apply Hreach.
@@ -228,20 +248,13 @@ Section FUNCTION.
       Dominates n entry -> n = entry.
   Proof.
     intros n.
-    destruct (Pos.eq_dec n entry).
-    {
-      intro H. apply e.
-    }
-    {
-      intro H.
-      inversion H.
-      reflexivity.
-      generalize (PATH nil).
-      intros Hpath.
-      assert (Hentry: Path entry nil entry). apply path_nil. apply reach_entry.
-      apply Hpath in Hentry.
-      inversion Hentry.
-    }
+    destruct (Pos.eq_dec n entry); intro H. apply e.
+    inversion H; auto.
+    generalize (PATH [entry]).
+    intros Hpath.
+    assert (Hentry: Path entry [entry] entry). apply path_nil. apply reach_entry.
+    apply Hpath in Hentry.
+    inversion Hentry; intuition.
   Qed.
 
   Theorem dom_reaches:
@@ -290,20 +303,11 @@ Section FUNCTION.
     apply dom_path.
     {
       intros path Hpath.
-      inversion Hpath.
-      {
-        subst.
-        assert (entry = entry). reflexivity. apply Hne in H. inversion H.
-      }
-      {
-        subst.
-        generalize (path_last entry m (entry :: p) Hne Hpath). intros Hsplit.
-        destruct Hsplit as [path [np [Hp [_ Hsucc']]]].
-        rewrite Hp.
-        apply in_or_app.
-        right. left. symmetry.
-        apply Huniq. apply Hsucc'.
-      }
+      inversion Hpath; subst. contradiction.
+      apply Huniq in HD.
+      subst.
+      right.
+      apply last_in_path with (x := entry). apply TL.
     }
     {
       apply reach_succ with (a := n). apply Hsucc. apply Hreach.
@@ -333,19 +337,19 @@ Section FUNCTION.
     reflexivity.
   Qed.
 
-  Inductive BlockHeader: node -> Prop :=
+  Inductive BasicBlockHeader: node -> Prop :=
     | block_header:
       forall (header: node)
         (REACH: Reachable header)
         (TERM: forall (term: node), SuccOf f term header -> TermAt f term)
         (INST: f.(fn_insts) ! header <> None),
-        BlockHeader header
+        BasicBlockHeader header
     .
 
   Inductive BasicBlock: node -> node -> Prop :=
     | bb_header:
       forall (header: node)
-        (HEADER: BlockHeader header),
+        (HEADER: BasicBlockHeader header),
           BasicBlock header header
     | bb_elem:
       forall (header: node) (prev: node) (elem: node)
@@ -373,7 +377,7 @@ Section FUNCTION.
 
   Theorem bb_has_header:
     forall (header: node) (elem: node),
-      BasicBlock header elem -> BlockHeader header.
+      BasicBlock header elem -> BasicBlockHeader header.
   Proof.
     intros header elem Hbb.
     induction Hbb.
@@ -435,9 +439,34 @@ Section FUNCTION.
     | basic_block_succ:
       forall (from: node) (to: node) (term: node)
         (HDR_FROM: BasicBlock from term)
-        (HDR_TO: BasicBlock to to)
+        (HDR_TO: BasicBlockHeader to)
         (SUCC: SuccOf f term to),
         BasicBlockSucc from to
+    .
+
+  Inductive BasicBlockPath: node -> list node -> node -> Prop :=
+    | bb_path_nil:
+      forall (n: node)
+        (REACH: Reachable n)
+        (HEADER: BasicBlockHeader n),
+        BasicBlockPath n [n] n
+    | bb_path_cons:
+      forall (from: node) (next: node) (to: node) (p: list node)
+        (REACH: Reachable from)
+        (TL: BasicBlockPath from p next)
+        (HD: BasicBlockSucc next to),
+        BasicBlockPath from (to :: p) to
+    .
+
+  Inductive BasicBlockDominates: node -> node -> Prop :=
+    | bb_dom_self:
+      forall (n: node),
+        BasicBlockDominates n n
+    | bb_dom_path:
+      forall (a: node) (b: node)
+        (PATH: forall (p: list node), BasicBlockPath entry p b -> In a p)
+        (REACH: Reachable b),
+        BasicBlockDominates a b
     .
 End FUNCTION.
 
