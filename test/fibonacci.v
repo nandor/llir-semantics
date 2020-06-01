@@ -58,9 +58,9 @@ Definition fib: func :=
   ; fn_entry := 1%positive
   |}.
 
-Theorem fib_inversion:
+Theorem fib_inst_inversion:
   forall (inst: option inst) (n: node),
-  (fn_insts fib) ! n = inst ->
+  inst = (fn_insts fib) ! n ->
     (1%positive = n /\ Some (LLArg 0 1%positive 2%positive) = inst)
     \/
     (2%positive = n /\ Some (LLInt32 (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O))))) 2%positive 3%positive) = inst)
@@ -88,7 +88,17 @@ Theorem fib_inversion:
     (17%positive = n /\ Some (LLRet 16%positive) = inst)
     \/
     inst = None.
-Proof. inversion_proof fib. Qed.
+Proof. inst_inversion_proof fib. Qed.
+
+Theorem fib_phi_inversion:
+  forall (phis: option (list phi)) (n: node),
+  phis = (fn_phis fib) ! n ->
+    (12%positive = n /\ Some [LLPhi [ (8%positive, 3%positive); (15%positive, 12%positive)] 9%positive; LLPhi [ (8%positive, 1%positive); (15%positive, 13%positive)] 10%positive; LLPhi [ (8%positive, 7%positive); (15%positive, 9%positive)] 11%positive] = phis)
+    \/
+    (17%positive = n /\ Some [LLPhi [ (5%positive, 3%positive); (15%positive, 12%positive)] 16%positive] = phis)
+    \/
+    phis = None.
+Proof. phi_inversion_proof fib. Qed.
 
 Theorem fib_defined_at_inversion:
   forall (n: node) (r: reg),
@@ -109,28 +119,16 @@ Theorem fib_defined_at_inversion:
       \/
       (13%positive = n /\ 13%positive = r)
       \/
-      (14%positive = n /\ 14%positive = r).
-Proof. defined_at_proof fib_inversion fib. Qed.
-
-Theorem fib_defined_at:
-  DefinedAt fib 1%positive 1%positive
-  /\
-  DefinedAt fib 2%positive 2%positive
-  /\
-  DefinedAt fib 3%positive 3%positive
-  /\
-  DefinedAt fib 4%positive 4%positive
-  /\
-  DefinedAt fib 6%positive 6%positive
-  /\
-  DefinedAt fib 7%positive 7%positive
-  /\
-  DefinedAt fib 12%positive 12%positive
-  /\
-  DefinedAt fib 13%positive 13%positive
-  /\
-  DefinedAt fib 14%positive 14%positive.
-Proof. intuition. Qed.
+      (14%positive = n /\ 14%positive = r)
+      \/
+      (12%positive = n /\ 9%positive = r)
+      \/
+      (12%positive = n /\ 10%positive = r)
+      \/
+      (12%positive = n /\ 11%positive = r)
+      \/
+      (17%positive = n /\ 16%positive = r).
+Proof. defined_at_inversion_proof fib fib_inst_inversion fib_phi_inversion. Qed.
 
 Theorem fib_used_at_inversion:
   forall (n: node) (r: reg),
@@ -141,17 +139,17 @@ Theorem fib_used_at_inversion:
       \/
       (5%positive = n /\ 4%positive = r)
       \/
-      (9%positive = n /\ 3%positive = r)
+      (8%positive = n /\ 3%positive = r)
       \/
-      (9%positive = n /\ 12%positive = r)
+      (15%positive = n /\ 12%positive = r)
       \/
-      (10%positive = n /\ 1%positive = r)
+      (8%positive = n /\ 1%positive = r)
       \/
-      (10%positive = n /\ 13%positive = r)
+      (15%positive = n /\ 13%positive = r)
       \/
-      (11%positive = n /\ 7%positive = r)
+      (8%positive = n /\ 7%positive = r)
       \/
-      (11%positive = n /\ 9%positive = r)
+      (15%positive = n /\ 9%positive = r)
       \/
       (12%positive = n /\ 9%positive = r)
       \/
@@ -167,12 +165,12 @@ Theorem fib_used_at_inversion:
       \/
       (15%positive = n /\ 14%positive = r)
       \/
-      (16%positive = n /\ 3%positive = r)
+      (5%positive = n /\ 3%positive = r)
       \/
-      (16%positive = n /\ 12%positive = r)
+      (15%positive = n /\ 12%positive = r)
       \/
       (17%positive = n /\ 16%positive = r).
-Proof. used_at_inversion_proof fib fib_inversion. Qed.
+Proof. used_at_inversion_proof fib fib_inst_inversion fib_phi_inversion. Qed.
 
 Theorem fib_defs_are_unique: defs_are_unique fib.
 Proof. defs_are_unique_proof fib_defined_at_inversion. Qed.
@@ -187,7 +185,7 @@ Theorem fib_bb_headers:
       12%positive = header
       \/
       17%positive = header.
-Proof. bb_headers_proof fib fib_inversion. Qed.
+Proof. bb_headers_proof fib fib_inst_inversion. Qed.
 
 Theorem fib_bb_inversion: 
   forall (header: node) (elem: node),
@@ -217,7 +215,7 @@ Theorem fib_bb_inversion:
       12%positive = header /\ 15%positive = elem
       \/
       17%positive = header /\ 17%positive = elem.
-Proof. bb_inversion_proof fib fib_inversion fib_bb_headers. Qed.
+Proof. bb_inversion_proof fib fib_inst_inversion fib_bb_headers. Qed.
 
 Theorem fib_bb_succ_inversion: 
   forall (from: node) (to: node),
@@ -242,8 +240,4 @@ Definition fib_dominator_solution :=
 
 Theorem fib_dominator_solution_correct: dominator_solution_correct fib fib_dominator_solution.
 Proof. dominator_solution_proof fib fib_dominator_solution fib_bb_headers fib_bb_succ_inversion. Qed.
-
-
-
-
 

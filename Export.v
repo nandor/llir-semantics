@@ -13,8 +13,7 @@ Require Import LLIR.State.
 
 Import ListNotations.
 
-
-Ltac inversion_proof fn :=
+Ltac inst_inversion_proof fn :=
   intros inst n Heq;
   unfold fn in Heq; unfold fn_insts in Heq;
   repeat rewrite PTrie.set_get in Heq;
@@ -26,68 +25,122 @@ Ltac inversion_proof fn :=
   end;
   auto.
 
-Ltac defined_at_proof inv fn :=
+Ltac phi_inversion_proof fn :=
+  intros int n Heq;
+  unfold fn in Heq; unfold fn_phis in Heq;
+  repeat rewrite PTrie.set_get in Heq;
+  unfold fst in Heq; unfold snd in Heq;
+  repeat match goal with
+  | [ Heq: context [Pos.eqb ?v n] |- _ ] =>
+    destruct (Pos.eqb v n) eqn:E;
+    [ left; apply Pos.eqb_eq in E; subst n; split; auto | clear E; right]
+  end;
+  auto.
+
+Ltac defined_at_inversion_proof fn fn_inst_inversion fn_phi_inversion :=
   intros n r Hdef_at;
-  unfold DefinedAt in *;
-  unfold Defs in *;
-  destruct ((fn_insts fn) ! n) eqn:Edef; try inversion Hdef_at;
-  apply inv in Edef;
-  repeat (destruct Edef as [Hdef|Edef]; try destruct Hdef as [Hi Hinst];
-    [ try left;
-      inversion Hinst as [Hinst_i]; rewrite <- Hinst_i in *;
-      match goal with
-      | [ Hi: ?v = n |- context [ ?v = n ] ] =>
-        subst r; subst n; auto
-      | [ H: False |- _ ] =>
-        inversion H
-      end
-    | match goal with
-      | [ H: context [ ?v = n ] |- (?v = n /\ _) \/ _ ] =>
-        auto
-      | _ =>
-        try right
-      end
-    ]);
-  inversion Edef.
+  inversion Hdef_at as [n' r' i INST DEFS|n' r' phi PHIS DEFS];
+  [
+    unfold InstDefs in *;
+    apply fn_inst_inversion in INST;
+    repeat (destruct INST as [Hdef|INST];
+      [
+        destruct Hdef as [Hn Hsome_inst];
+        inversion Hsome_inst as [Hinst];
+        rewrite <- Hinst in DEFS;
+        inversion DEFS;
+        subst n r;
+        repeat match goal with
+        | [ |- (?n = ?n /\ ?r = ?r) \/ _ ] => left; split; reflexivity
+        | [ |- ?n = ?n /\ ?r = ?r ] => split; reflexivity
+        | [ |- _ ] => right
+        end
+      |]);
+    inversion INST
+  |
+    unfold PhiDefs in *;
+    apply fn_phi_inversion in PHIS;
+    repeat (destruct PHIS as [Hdef|PHIS];
+      [
+        destruct Hdef as [Hn Hsome_inst];
+        inversion Hsome_inst as [Hinst];
+        rewrite <- Hinst in DEFS;
+        apply Exists_exists in DEFS;
+        destruct DEFS as [phi' [Hin Hdst]];
+        repeat (destruct Hin as [Hphi|Hin];
+          [ rewrite <- Hphi in Hdst; subst n r;
+            repeat match goal with
+            | [ |- (?n = ?n /\ ?r = ?r) \/ _ ] => left; split; reflexivity
+            | [ |- ?n = ?n /\ ?r = ?r ] => split; reflexivity
+            | [ |- _ ] => right
+            end
+          |
+          ]);
+        inversion Hin
+      |]);
+    inversion PHIS
+  ].
 
-Ltac defs_are_unique_proof inv :=
+Ltac defs_are_unique_proof defined_at_inversion :=
   intros def def' r Hdef Hdef';
-  apply inv in Hdef;
-  apply inv in Hdef';
-  repeat destruct Hdef as [Hd|Hdef]; repeat destruct Hdef' as [Hd'|Hdef'];
-  repeat match goal with
-  | [ H: ?v = ?def /\ ?v = r |- _ ] => destruct H; subst def
-  | [ |- ?v = ?v ] => reflexivity
-  | [ |- _ ] => subst r; auto
-  end.
+  apply defined_at_inversion in Hdef;
+  apply defined_at_inversion in Hdef';
+  repeat destruct Hdef as [Hdef|Hdef];
+  repeat destruct Hdef' as [Hdef'|Hdef'];
+  destruct Hdef as [Hd Hn];
+  destruct Hdef' as [Hd' Hn'];
+  subst r def def'; auto; try inversion Hn'.
 
-Ltac used_at_inversion_proof fn inv :=
+Ltac used_at_inversion_proof fn fn_inst_inversion fn_phi_inversion :=
   intros n r Hused_at;
-  unfold UsedAt in *;
-  unfold Uses in *;
-  destruct ((fn_insts fn) ! n) eqn:Edef; try inversion Hused_at;
-  apply inv in Edef;
-  repeat match goal with
-  | [ H: ?v = n /\ Some ?inst = Some ?name |- _ ] =>
-    destruct H as [Hn Hinst];
-    inversion Hinst;
-    subst name
-  | [ H: False |- _ ] => inversion H
-  | [ H: ?a \/ ?b |- _ ] => destruct H
-  end;
-  match goal with
-  | [ Hn: ?vn = n, Hr: ?vr = r |- _] =>
-    assert (Hcase: vn = n /\ vr = r); [ split; [apply Hn|apply Hr] |]
-  | [ |- _ ] => simpl
-  end;
-  repeat match goal with
-  | [ H: ?vn = n /\ ?vr = r |- (?vn = n /\ ?vr = r) \/ _ ] => left; apply H
-  | [ H: ?vn = n /\ ?vr = r |- (?vn = n /\ ?vr = r) ] => apply H
-  | [ |- _ ] => right
-  end;
-  inversion H.
+  inversion Hused_at as [n' r' i INST USES|n' r' block phis PHIS USES];
+  [
+    clear Hused_at; unfold InstUses in *;
+    apply fn_inst_inversion in INST;
+    repeat (destruct INST as [[Hn Hinst]|INST];
+      [ inversion Hinst; clear Hinst; subst i n n' r'
+      |
+      ]);
+      repeat match goal with
+      | [ H: False |- _ ] => inversion H
+      | [ H: ?a = r \/ ?b = r |- _ ] => destruct H
+      end;
+      try subst r;
+      repeat match goal with
+      | [ |- (?n = ?n /\ ?r = ?r) \/ _ ] => left; split; reflexivity
+      | [ |- ?n = ?n /\ ?r = ?r ] => split; reflexivity
+      | [ |- _ ] => right
+      end;
+    inversion INST
+  |
+    clear Hused_at; unfold PhiBlockUses in *;
+    apply fn_phi_inversion in PHIS;
+    repeat (destruct PHIS as [[Hb Hphis]|PHIS];
+      [ inversion Hphis; subst phis; clear Hphis;
+        apply Exists_exists in USES;
+        destruct USES as [x [Hin Huses]];
+        repeat (destruct Hin as [Hphi|Hin];
+          [ subst x; unfold PhiUses in Huses;
+            apply Exists_exists in Huses;
+            destruct Huses as [[n'' r''] [Hphi_in [Hn Hr]]];
+            subst n'' r'';
+            repeat (destruct Hphi_in as [Hbr|Hphi_in];
+              [ inversion Hbr; subst n' r'
+              | simpl in Hphi_in
+              ])
+          | simpl in Hin
+          ]);
+          repeat match goal with
+          | [ H: False |- _ ] => inversion H
+          | [ |- (?n = ?n /\ ?r = ?r) \/ _ ] => left; split; reflexivity
+          | [ |- ?n = ?n /\ ?r = ?r ] => split; reflexivity
+          | [ |- _ ] => right
+          end
+      |]);
+    inversion PHIS
+  ].
 
-Ltac reach_pred_step func pred :=
+Ltac reach_pred_step fn pred :=
   apply reach_succ with (a := pred);
   [
     unfold SuccOf;
@@ -96,7 +149,7 @@ Ltac reach_pred_step func pred :=
   |
   ].
 
-Ltac block_elem_proof func func_inv p proof_prev :=
+Ltac block_elem_proof fn fn_inv p proof_prev :=
   apply bb_elem with (prev := p);
   [ intro contra; inversion contra
   | intro contra; inversion contra
@@ -106,39 +159,38 @@ Ltac block_elem_proof func func_inv p proof_prev :=
   | auto
   | intros prev' Hsucc;
     unfold SuccOf in Hsucc; unfold Succeeds in Hsucc;
-    remember ((fn_insts func) ! prev') as inst eqn:Hinst;
+    remember ((fn_insts fn) ! prev') as inst eqn:Hinst;
     symmetry in Hinst;
-    apply func_inv in Hinst;
+    apply fn_inv in Hinst;
     repeat destruct Hinst as [[Hl Hr]|Hinst]; subst inst; auto; try inversion Hsucc; try inversion H
   ].
 
-Ltac block_header_proof func func_inv bb_reach :=
+Ltac block_header_proof fn fn_inv bb_reach :=
   apply block_header;
   [ apply bb_reach
   | intros term Hsucc;
     unfold SuccOf in Hsucc; unfold Succeeds in Hsucc; unfold TermAt;
-    remember ((fn_insts func) ! term) as inst eqn:H;
+    remember ((fn_insts fn) ! term) as inst eqn:H;
     symmetry in H;
-    apply func_inv in H;
+    apply fn_inv in H;
     repeat destruct H as [[Hl Hr]|H];
       subst inst; try subst term; simpl; auto;
       inversion Hsucc; inversion H
   | intros contra; inversion contra
   ].
 
-Ltac bb_headers_proof func func_inversion :=
+Ltac bb_headers_proof fn func_inversion :=
   intros header Hbb;
   inversion Hbb as [header'' REACH TERM NODE];
-  remember ((fn_insts func) ! header) as inst eqn:Einst;
-  remember (get_predecessors func header) as pred eqn:Epred;
-  symmetry in Einst;
+  remember ((fn_insts fn) ! header) as inst eqn:Einst;
+  remember (get_predecessors fn header) as pred eqn:Epred;
   apply func_inversion in Einst;
   repeat (destruct Einst as [[Ehdr Ei]|Einst]; [auto; (
     rewrite <- Ehdr in Epred;
     compute in Epred;
     match goal with
     | [ E: pred = [ ?p ] |- _ ] =>
-      assert (Hsucc: SuccOf func p header);
+      assert (Hsucc: SuccOf fn p header);
       subst header;
       compute;
       auto;
@@ -149,10 +201,11 @@ Ltac bb_headers_proof func func_inversion :=
   apply NODE in Einst; inversion Einst.
 
 
-Ltac bb_inversion_proof func func_inversion func_headers :=
+Ltac bb_inversion_proof fn func_inversion func_headers :=
   intros header elem BLOCK;
-  destruct ((fn_insts func) ! elem) eqn:Einst;
-  [ apply func_inversion in Einst;
+  destruct ((fn_insts fn) ! elem) eqn:Einst;
+  [ symmetry in Einst;
+  apply func_inversion in Einst;
     repeat (destruct Einst as [[Helem _]|Einst];
       [ repeat match goal with
         | [ H: ?e = elem |- ?n = header /\ ?e = elem ] =>
@@ -233,7 +286,7 @@ Definition dominator_solution_correct fn doms :=
                   /\
                   In n' doms_pred.
 
-Ltac dominator_solution_proof func solution func_bb_headers func_bb_succ_inversion :=
+Ltac dominator_solution_proof fn solution func_bb_headers func_bb_succ_inversion :=
   split; [ compute; reflexivity | ];
   intros n Hbb;
   apply func_bb_headers in Hbb;

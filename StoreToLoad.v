@@ -44,19 +44,27 @@ Definition rewrite_reg (loads: PTrie.t reg) (r: reg): reg :=
   end.
 
 Definition rewrite_inst (i: inst) (loads: PTrie.t reg): inst :=
-  rewrite_uses i (rewrite_reg loads).
+  rewrite_inst_uses i (rewrite_reg loads).
 
 Definition rewrite_insts (insts: inst_map) (loads: PTrie.t reg): inst_map :=
-  PTrie.map (fun k inst => rewrite_inst inst loads) insts.
+  PTrie.map (fun k i => rewrite_inst i loads) insts.
 
+Definition rewrite_phi (p: phi) (loads: PTrie.t reg): phi :=
+  rewrite_phi_uses p (rewrite_reg loads).
+
+Definition rewrite_phi_block (phis: list phi) (loads: PTrie.t reg): list phi :=
+  List.map (fun p => rewrite_phi p loads) phis.
+
+Definition rewrite_phis (phis: phi_map) (loads: PTrie.t reg): phi_map :=
+  PTrie.map (fun k phis => rewrite_phi_block phis loads) phis.
 
 Definition propagate_store_to_load (f: func): func :=
   let aa := local_pta f in
   let rs := analyse_reaching_stores f aa in
   let loads := closure (find_load_reg f.(fn_insts) rs aa) in
   let fn_insts := rewrite_insts f.(fn_insts) loads in
-  mkfunc f.(fn_stack) fn_insts f.(fn_phis) f.(fn_entry).
-
+  let fn_phis := rewrite_phis f.(fn_phis) loads in
+  mkfunc f.(fn_stack) fn_insts fn_phis f.(fn_entry).
 
 Section LOAD_PROPERTIES.
   Variable f: func.
@@ -124,7 +132,8 @@ Section LOAD_PROPERTIES.
     inversion Hst_at.
     assert (Hused_at: UsedAt f orig src).
     {
-      unfold UsedAt. rewrite <- H6. unfold Uses. right. auto.
+      apply used_at_inst with (i := LLSt addr1 src next0); auto.
+      unfold InstUses; auto.
     }
     destruct H_f_valid as [Huses_have_defs _].
     unfold uses_have_defs in Huses_have_defs.
@@ -133,7 +142,11 @@ Section LOAD_PROPERTIES.
     destruct Hdef as [def [Hdefs Hdom]].
     exists def. exists k.
     split. apply Hdefs.
-    split. unfold DefinedAt. rewrite <- H0. unfold Defs. auto.
+    split.
+    {
+      apply defined_at_inst with (i := LLLd addr dst next); auto.
+      unfold InstDefs; auto.
+    }
     apply sdom_trans with (m := orig).
     apply Hdom. apply Hsdom.
   Qed.
@@ -184,26 +197,26 @@ Section LOAD_PROPERTIES.
     apply Hdom.
   Qed.
 
-  Lemma propagate_use_inversion:
+  Lemma propagate_inst_use_inversion:
     forall (user: inst) (user': inst) (r: reg),
       user' = rewrite_inst user loads' ->
-      Uses user' r ->
+      InstUses user' r ->
       (
-        (PTrie.get loads' r = None /\ Uses user r)
+        (PTrie.get loads' r = None /\ InstUses user r)
         \/
-        (exists (r': reg), PTrie.get loads' r' = Some r /\ Uses user r')
+        (exists (r': reg), PTrie.get loads' r' = Some r /\ InstUses user r')
       ).
   Proof.
     intros user user' r Huser' Huses.
     rewrite Huser' in Huses.
     unfold rewrite_inst in Huses.
-    unfold rewrite_uses in Huses.
+    unfold rewrite_inst_uses in Huses.
     unfold rewrite_reg in Huses.
     unfold rewrite_inst in Huser'.
-    unfold rewrite_uses in Huser'.
+    unfold rewrite_inst_uses in Huser'.
     unfold rewrite_reg in Huser'.
-    unfold Uses in Huses.
-    unfold Uses.
+    unfold InstUses in Huses.
+    unfold InstUses.
     destruct user eqn:Euser;
       destruct Huses;
       repeat match goal with
@@ -267,6 +280,96 @@ Section LOAD_PROPERTIES.
         }
       }
   Qed.
+
+  Lemma propagate_phi_use_inversion:
+    forall (user: phi) (user': phi) (n: node) (r: reg),
+      user' = rewrite_phi user loads' ->
+      PhiUses user' n r ->
+      (
+        (PTrie.get loads' r = None /\ PhiUses user n r)
+        \/
+        (exists (r': reg), PTrie.get loads' r' = Some r /\ PhiUses user n r')
+      ).
+  Proof.
+    intros user user' n r Huser' Huses.
+    rewrite Huser' in Huses.
+    unfold rewrite_phi in Huses.
+    unfold rewrite_phi_uses in Huses.
+    unfold rewrite_reg in Huses.
+    unfold rewrite_phi in Huser'.
+    unfold rewrite_phi_uses in Huser'.
+    unfold rewrite_reg in Huser'.
+    unfold PhiUses in Huses.
+    unfold PhiUses.
+    destruct user.
+
+    apply Exists_exists in Huses.
+    destruct Huses as [[n' r'] [Hin [Hn Hr]]]. subst n' r'.
+    apply in_map_iff in Hin.
+    destruct Hin as [[n' r'] [Heq Hin]].
+
+    destruct (Pos.eq_dec r r').
+    {
+      subst r'.
+      destruct (loads' ! r) eqn:E.
+      {
+        inversion Heq. subst n' p.
+        right. exists r; split; auto.
+        apply Exists_exists. exists (n, r). auto.
+      }
+      {
+        left. split; auto.
+        apply Exists_exists.
+        inversion Heq.
+        exists (n', r); repeat split; auto.
+      }
+    }
+    {
+      destruct (loads' ! r') eqn:E; inversion Heq.
+      {
+        subst n' p.
+        right. exists r'. split; auto.
+        apply Exists_exists. exists (n, r'). auto.
+      }
+      {
+        subst r'. contradiction.
+      }
+    }
+  Qed.
+
+  Lemma propagate_phi_block_use_inversion:
+    forall (user: list phi) (user': list phi) (n: node) (r: reg),
+      user' = rewrite_phi_block user loads' ->
+      PhiBlockUses user' n r ->
+      (
+        (PTrie.get loads' r = None /\ PhiBlockUses user n r)
+        \/
+        (exists (r': reg), PTrie.get loads' r' = Some r /\ PhiBlockUses user n r')
+      ).
+  Proof.
+    intros user user' n r Huser' Huses.
+    unfold PhiBlockUses in Huses.
+    apply Exists_exists in Huses.
+    destruct Huses as [phi' [Hphi_in' Hphi']].
+    rewrite Huser' in Hphi_in'.
+    unfold rewrite_phi_block in Hphi_in'.
+    apply List.in_map_iff in Hphi_in'.
+    destruct Hphi_in' as [phi [Hphi_in Hphi]].
+    symmetry in Hphi_in.
+    generalize (propagate_phi_use_inversion phi phi' n r Hphi_in Hphi').
+    intros Hinv.
+    destruct Hinv as [[Hloads Huse]|[r' [Hloads Huse]]].
+    {
+      left. split; auto. 
+      unfold PhiBlockUses. apply Exists_exists.
+      exists phi; auto.
+    }
+    {
+      right. exists r'. split; auto.
+      unfold PhiBlockUses. apply Exists_exists.
+      exists phi; auto.
+    }
+  Qed.
 End LOAD_PROPERTIES.
 
 Section PROPAGATE_PROPERTIES.
@@ -294,7 +397,7 @@ Section PROPAGATE_PROPERTIES.
       rewrite PTrie.map_get.
       destruct ((fn_insts f) ! src) as [inst|]; try inversion Hsucc.
       destruct ((fn_insts f) ! dst) as [inst'|]; try inversion Hsucc.
-      unfold rewrite_uses. simpl.
+      unfold rewrite_inst_uses. simpl.
       unfold Succeeds in *.
       destruct inst; subst; auto.
     }
@@ -347,35 +450,92 @@ Section PROPAGATE_PROPERTIES.
     intros n reg.
     split.
     {
-      intro Hdef'.
-      unfold DefinedAt in Hdef'.
-      destruct ((fn_insts (propagate_store_to_load f)) ! n) eqn:E;
-        try inversion Hdef'.
-      unfold propagate_store_to_load, rewrite_insts in E.
-      simpl in E. symmetry in E.
-      apply PTrie.map_in in E.
-      destruct E as [inst [Hloc Hdef]].
-      unfold DefinedAt.
-      rewrite <- Hloc.
-      rewrite Hdef in Hdef'.
-      unfold rewrite_inst, rewrite_uses in Hdef'.
-      unfold Defs in Hdef'. unfold Defs.
-      destruct inst; auto.
+      intro Hdef'; inversion Hdef'.
+      { 
+        unfold propagate_store_to_load, rewrite_insts in INST.
+        simpl in INST. apply PTrie.map_in in INST.
+        destruct INST as [inst [Hloc Hdef]]. subst i.
+        apply defined_at_inst with (i := inst). apply Hloc.
+        unfold rewrite_inst, rewrite_inst_uses, InstDefs in DEFS. unfold InstDefs.
+        destruct inst; auto.
+      }
+      {
+        unfold propagate_store_to_load, rewrite_phis in PHIS.
+        simpl in PHIS. apply PTrie.map_in in PHIS.
+        destruct PHIS as [phis_f [Hloc_phis Hdef_phis]].
+        apply defined_at_phi with (phis := phis_f). apply Hloc_phis.
+        apply Exists_exists in DEFS.
+        destruct DEFS as [phi' [Hin_phi Hdef_phi']].
+        rewrite Hdef_phis in Hin_phi.
+        apply List.in_map_iff in Hin_phi.
+        destruct Hin_phi as [phi [Hrw Hin]].
+        apply Exists_exists.
+        exists phi. split. auto.
+        unfold PhiDefs in *.
+        destruct phi'; destruct phi.
+        unfold rewrite_phi, rewrite_phi_uses in Hrw.
+        inversion Hrw.
+        auto.
+      }
     }
     {
       intros Hdef.
-      unfold DefinedAt in Hdef.
-      destruct ((fn_insts f) ! n) eqn:E; try inversion Hdef.
-      unfold propagate_store_to_load, rewrite_insts.
-      unfold DefinedAt.
-      simpl.
-      rewrite PTrie.map_get.
-      unfold option_map.
-      rewrite E.
-      unfold rewrite_inst.
-      unfold rewrite_uses.
-      unfold Defs in  *.
-      destruct i; auto.
+      inversion Hdef.
+      {
+        unfold propagate_store_to_load, rewrite_insts.
+        remember (local_pta f) as aa.
+        remember (analyse_reaching_stores f aa) as rs.
+        remember ((find_load_reg (fn_insts f) rs aa)) as loads.
+        remember (closure loads) as loads'.
+        apply defined_at_inst with (i := rewrite_inst i loads').
+        {
+          simpl.
+          rewrite PTrie.map_get.
+          unfold option_map.
+          rewrite <- INST.
+          auto.
+        }
+        {
+          unfold InstDefs in *.
+          destruct i; auto.
+        }
+      }
+      {
+        apply Exists_exists in DEFS.
+        destruct DEFS as [phi [Hin_phi Hdef_phi]].
+        remember (local_pta f) as aa.
+        remember (analyse_reaching_stores f aa) as rs.
+        remember ((find_load_reg (fn_insts f) rs aa)) as loads.
+        remember (closure loads) as loads'.
+        apply defined_at_phi with (phis := rewrite_phi_block phis loads').
+        {
+          unfold propagate_store_to_load, rewrite_phis. simpl.
+          rewrite PTrie.map_get.
+          unfold option_map.
+          rewrite <- PHIS.
+          rewrite <- Heqaa.
+          rewrite <- Heqrs.
+          rewrite <- Heqloads.
+          rewrite <- Heqloads'.
+          reflexivity.
+        }
+        {
+          apply Exists_exists.
+          exists (rewrite_phi phi loads').
+          split.
+          {
+            unfold rewrite_phi_block.
+            apply List.in_map_iff.
+            exists phi.
+            split; auto.
+          }
+          {
+            unfold PhiDefs in *.
+            destruct phi.
+            auto.
+          }
+        }
+      }
     }
   Qed.
 
@@ -400,105 +560,126 @@ Section PROPAGATE_PROPERTIES.
       rewrite <- Heqrs in Hused.
       rewrite <- Heqloads in Hused.
       rewrite <- Heqloads' in Hused.
-      unfold UsedAt in Hused.
-      simpl in Hused.
-      destruct ((rewrite_insts (fn_insts f) loads') ! use) as [user'|] eqn:E;
-        try inversion Hused.
-      unfold rewrite_insts in E.
-      symmetry in E.
-      apply PTrie.map_in in E.
-      destruct E.
-      destruct H as [Hin Hwr].
-      generalize (propagate_use_inversion
-        f rs aa loads loads'
-        H_f_valid Heqloads Heqloads'
-        x user' r
-        Hwr Hused).
-      intros Hinv.
-      generalize (Hdefs use r).
-      intros Huse_implies_def.
-      destruct Hinv.
+      inversion Hused; clear Hused.
       {
-        destruct H as [Hload Huse].
-        assert (Huse_at: UsedAt f use r).
-        { unfold UsedAt. rewrite <- Hin. apply Huse. }
-        apply Huse_implies_def in Huse_at.
-        destruct Huse_at as [def [Hdef Hdom]].
-        exists def.
-        split.
+        simpl in INST.
+        unfold rewrite_insts in INST.
+        apply PTrie.map_in in INST.
+        destruct INST as [i_use [Hin Hwr]].
+        generalize (propagate_inst_use_inversion
+          f rs aa loads loads'
+          H_f_valid Heqloads Heqloads'
+          i_use i r Hwr USES).
+        intros Hinv.
+        generalize (Hdefs use r).
+        intros Huse_implies_def.
+        destruct Hinv as [[Hload Huse]|[r' [Hsubst Huse]]].
         {
-          unfold DefinedAt.
-          destruct ((fn_insts f') ! def) eqn:E.
+          assert (Huse_at: UsedAt f use r).
           {
-            rewrite Heqf' in E.
-            unfold propagate_store_to_load, rewrite_insts, rewrite_inst in E.
-            simpl in E.
-            symmetry in E.
-            apply PTrie.map_in in E.
-            destruct E as [a [Hin_a Hrw_a]].
-            unfold DefinedAt in Hdef.
-            rewrite <- Hin_a in Hdef.
-            rewrite Hrw_a.
-            unfold rewrite_uses.
-            unfold Defs.
-            unfold Defs in Hdef.
-            destruct a; subst; auto.
+            apply used_at_inst with (i := i_use). 
+            + rewrite <- Hin. reflexivity.
+            + apply Huse.
           }
-          {
-            rewrite Heqf' in E.
-            unfold propagate_store_to_load, rewrite_insts, rewrite_inst in E.
-            simpl in E.
-            rewrite PTrie.map_get in E.
-            unfold option_map in E.
-            unfold DefinedAt in Hdef.
-            destruct ((fn_insts f) ! def) eqn:E'; inversion E.
-            inversion Hdom.
-            inversion DOM; subst; auto.
-          }
+          apply Huse_implies_def in Huse_at.
+          destruct Huse_at as [def [Hdef Hdom]].
+          exists def.
+          rewrite Heqf'.
+          split.
+          + apply preserves_defs. apply Hdef.
+          + apply preserves_sdom. apply Hdom.
         }
         {
-          rewrite Heqf'.
-          apply preserves_sdom.
-          apply Hdom.
+          assert (Hchain: chain loads r' r).
+          {
+            apply (H_loads_relation' loads loads' Heqloads').
+            symmetry. apply Hsubst.
+          }
+          generalize (propagate_chain_sdom
+            f rs aa loads loads'
+            H_f_valid
+            Heqloads Heqloads'
+            r' r
+            Hchain).
+          intros Hprop.
+          destruct Hprop as [ks [kd [Hdefks [Hdefkd Hdom]]]].
+          exists ks.
+          split.
+          {
+            rewrite Heqf'.
+            apply preserves_defs.
+            apply Hdefks.
+          }
+          {
+            rewrite Heqf'.
+            apply preserves_sdom.
+            clear Huse_implies_def.
+            apply sdom_trans with (m := kd). apply Hdom.
+            assert (Hused_at_r': UsedAt f use r').
+            { apply used_at_inst with (i := i_use). apply Hin. apply Huse. }
+            apply defs_dominate_uses with (r := r').
+            apply H_f_valid. apply Hdefkd.
+            apply Hused_at_r'.
+          }
         }
       }
       {
-        destruct H as [r' [Hsubst Huse]].
-        assert (Hchain: chain loads r' r).
+        simpl in PHIS.
+        unfold rewrite_phis in PHIS.
+        apply PTrie.map_in in PHIS.
+        destruct PHIS as [phis' [Hin Hwr]].
+        generalize (propagate_phi_block_use_inversion loads' phis' phis use r Hwr USES).
+        intros Hinv.
+        generalize (Hdefs use r).
+        intros Huse_implies_def.
+        destruct Hinv as [[_ Huses]|[r' [Hsubst Huse]]].
         {
-          apply (H_loads_relation' loads loads' Heqloads').
-          symmetry. apply Hsubst.
-        }
-        generalize (propagate_chain_sdom
-          f rs aa loads loads'
-          H_f_valid
-          Heqloads Heqloads'
-          r' r
-          Hchain).
-        intros Hprop.
-        destruct Hprop as [ks [kd [Hdefks [Hdefkd Hdom]]]].
-        exists ks.
-        split.
-        {
-          rewrite Heqf'.
-          apply preserves_defs.
-          apply Hdefks.
-        }
-        {
-          rewrite Heqf'.
-          apply preserves_sdom.
-          clear Huse_implies_def.
-          apply sdom_trans with (m := kd). apply Hdom.
-          assert (Hused_at_r': UsedAt f use r').
+          assert (Huse_at: UsedAt f use r).
           {
-            unfold UsedAt.
-            rewrite <- Hin.
-            apply Huse.
+            apply used_at_phi with (block := block) (phis := phis'). 
+            apply Hin.
+            apply Huses.
           }
-          clear Hdom.
-          apply defs_dominate_uses with (r := r').
-          apply H_f_valid. apply Hdefkd.
-          unfold UsedAt. rewrite <- Hin. apply Huse.
+          apply Huse_implies_def in Huse_at.
+          destruct Huse_at as [def [Hdef Hdom]].
+          exists def.
+          rewrite Heqf'.
+          split.
+          + apply preserves_defs. auto.
+          + apply preserves_sdom. auto.
+        }
+        {
+          assert (Hchain: chain loads r' r).
+          {
+            apply (H_loads_relation' loads loads' Heqloads').
+            symmetry. apply Hsubst.
+          }
+          generalize (propagate_chain_sdom
+            f rs aa loads loads'
+            H_f_valid
+            Heqloads Heqloads'
+            r' r
+            Hchain).
+          intros Hprop.
+          destruct Hprop as [ks [kd [Hdefks [Hdefkd Hdom]]]].
+          exists ks.
+          split.
+          {
+            rewrite Heqf'.
+            apply preserves_defs.
+            apply Hdefks.
+          }
+          {
+            rewrite Heqf'.
+            apply preserves_sdom.
+            clear Huse_implies_def.
+            apply sdom_trans with (m := kd). apply Hdom.
+            assert (Hused_at_r': UsedAt f use r').
+            { apply used_at_phi with (block := block) (phis := phis'). apply Hin. apply Huse. }
+            apply defs_dominate_uses with (r := r').
+            apply H_f_valid. apply Hdefkd.
+            apply Hused_at_r'.
+          }
         }
       }
     }

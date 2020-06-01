@@ -242,7 +242,7 @@ Module PTrie <: PARTIAL_MAP.
     induction i; simpl; congruence.
   Qed.
 
-  Lemma append_neutral_l: 
+  Lemma append_neutral_l:
     forall (i : positive), append xH i = i.
   Proof.
     simpl; auto.
@@ -292,7 +292,7 @@ Module PTrie <: PARTIAL_MAP.
 
     Theorem map_opt_inversion:
       forall (t: t A) (k: key) (b: B),
-         Some b = get (map_opt t) k -> 
+         Some b = get (map_opt t) k ->
           exists a, (Some a = get t k /\ Some b = f k a).
     Admitted.
   End MAP_OPT.
@@ -336,6 +336,11 @@ Module PTrie <: PARTIAL_MAP.
     Theorem map_get :
       forall (t: t A) (k: key),
         get (map t) k = option_map (f k) (get t k).
+    Admitted.
+
+    Theorem map_correct:
+      forall (t: t A) (k: key) (a: A) (b: B),
+        (Some a = get t k) -> b = f k a -> Some b = get (map t) k.
     Admitted.
   End MAP.
 
@@ -488,7 +493,7 @@ Module PTrie <: PARTIAL_MAP.
       subst v0.
       apply Hr.
     Qed.
-  End VALUES.
+  End VALUES.      
 
   Section KEYS.
     Variable V: Type.
@@ -581,7 +586,7 @@ Module PTrie <: PARTIAL_MAP.
       induction a; intros k; simpl.
       try rewrite f_none; reflexivity.
       destruct k; try reflexivity.
-      apply IHa2.  
+      apply IHa2.
       apply IHa1.
     Qed.
 

@@ -82,10 +82,8 @@ Inductive phi : Type :=
   | LLPhi (ins: list (node * reg)) (dst: reg)
   .
 
-Definition phis := list phi.
-
 Definition inst_map := PTrie.t inst.
-Definition phi_map := PTrie.t phis.
+Definition phi_map := PTrie.t (list phi).
 
 Record func : Type := mkfunc
   { fn_stack: PTrie.t object
@@ -98,7 +96,7 @@ Record func : Type := mkfunc
 Definition prog : Type := PTrie.t func.
 
 
-Definition Defs (i: inst) (r: reg): Prop :=
+Definition InstDefs (i: inst) (r: reg): Prop :=
   match i with
   | LLLd _ dst _ => dst = r
   | LLSt _ _ _ => False
@@ -125,7 +123,7 @@ Definition PhiDefs (i: phi) (r: reg): Prop :=
   | LLPhi _ dst => r = dst
   end.
 
-Definition Uses (i: inst) (r: reg): Prop :=
+Definition InstUses (i: inst) (r: reg): Prop :=
   match i with
   | LLLd addr _ _ => addr = r
   | LLSt addr val _ => addr = r \/ val = r
@@ -146,6 +144,17 @@ Definition Uses (i: inst) (r: reg): Prop :=
   | LLUnop _ _ arg _ _ => arg = r
   | LLBinop _ _ lhs rhs _ _ => lhs = r \/ rhs = r
   end.
+
+Definition PhiUses (p: phi) (n: reg) (r: reg): Prop :=
+  match p with
+  | LLPhi ins _ => Exists (fun phi_in =>
+    match phi_in with
+    | (n', r') => n' = n /\ r' = r
+    end) ins
+  end.
+
+Definition PhiBlockUses (phis: list phi) (n: node) (r: reg): Prop :=
+    Exists (fun phi => PhiUses phi n r) phis.
 
 Definition Succeeds (i: inst) (succ: node): Prop :=
   match i with
@@ -197,23 +206,31 @@ Definition Terminator (i: inst): Prop :=
 Section FUNCTION.
   Variable f: func.
 
-  Definition DefinedAt (n: node) (r: reg): Prop :=
-    match f.(fn_insts) ! n with
-    | None => False
-    | Some inst => Defs inst r
-    end.
+  Inductive DefinedAt: node -> reg -> Prop :=
+    | defined_at_inst:
+      forall (n: node) (r: reg) (i: inst)
+        (INST: Some i = f.(fn_insts) ! n)
+        (DEFS: InstDefs i r),
+        DefinedAt n r
+    | defined_at_phi:
+      forall (n: node) (r: reg) (phis: list phi)
+        (PHIS: Some phis = f.(fn_phis) ! n)
+        (DEFS: Exists (fun phi => PhiDefs phi r) phis),
+        DefinedAt n r
+    .
 
-  Definition PhiDefinedAt (n: node) (r: reg): Prop :=
-    match f.(fn_phis) ! n with
-    | None => False
-    | Some phis => Exists (fun phi => PhiDefs phi r) phis
-    end.
-
-  Definition UsedAt (n: node) (r: reg): Prop :=
-    match f.(fn_insts) ! n with
-    | None => False
-    | Some inst => Uses inst r
-    end.
+  Inductive UsedAt: node -> reg -> Prop :=
+    | used_at_inst:
+      forall (n: node) (r: reg) (i: inst)
+        (INST: Some i = f.(fn_insts) ! n)
+        (USES: InstUses i r),
+        UsedAt n r
+    | used_at_phi:
+      forall (n: node) (r: reg) (block: node) (phis: list phi)
+        (PHIS: Some phis = f.(fn_phis) ! block)
+        (USES: PhiBlockUses phis n r),
+        UsedAt n r
+    .
 
   Definition SuccOf (n: node) (m: node): Prop :=
     match f.(fn_insts) ! n, f.(fn_insts) ! m with
