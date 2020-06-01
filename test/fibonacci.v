@@ -278,7 +278,7 @@ Theorem fib_bb:
   BasicBlock fib 12%positive 15%positive
   /\
   BasicBlock fib 17%positive 17%positive.
-Admitted.
+Proof. bb_proof fib fib_inst_inversion fib_bb_headers . Qed.
 
 Theorem fib_bb_succ_inversion: 
   forall (from: node) (to: node),
@@ -307,98 +307,6 @@ Proof. dominator_solution_proof fib fib_dominator_solution fib_bb_headers_invers
 Theorem fib_defs_are_unique: defs_are_unique fib.
 Proof. defs_are_unique_proof fib_defined_at_inversion. Qed.
 
-Ltac bb_dom_step func func_bb_headers Hbb :=
-  match goal with
-  | [ |- Dominates _ _ ?node ] =>
-    remember (get_predecessors func node) as preds eqn:Epreds; compute in Epreds;
-    match goal with
-    | [ H: preds = [?n] |- _ ] =>
-      remember n as pred eqn:Epred;
-      try rewrite Epred in Hbb;
-      try rewrite Epred;
-      clear Epreds preds;
-      assert (Hsucc: SuccOf func pred node); [subst pred; compute; reflexivity|];
-      apply bb_elem_pred in Hbb;
-      destruct Hbb as [H|H];
-        [ apply func_bb_headers in H;
-          repeat destruct H as [H|H];
-          inversion H
-        | generalize (H pred Hsucc); intros Hinv;
-          match goal with
-          | [ H: pred = ?h |- Dominates _ ?h _ ] =>
-            clear Epreds Hsucc;
-            subst pred;
-            destruct Hinv as [_ Hdom]; auto
-          | [ |- _ ] =>
-            destruct Hinv as [Hbb Hdom];
-            apply dom_trans with (m := pred); subst pred; auto;
-            clear Hsucc Hdom H
-          end
-        ]
-    end
-  end.
-
-Ltac uses_have_defs_proof
-    func
-    func_used_at_inversion
-    func_defined_at
-    func_bb
-    func_bb_headers_inversion
-    func_dominator_solution
-    func_dominator_solution_correct :=
-  intros n r Hused_at;
-  apply func_used_at_inversion in Hused_at;
-  repeat destruct Hused_at as [Hused_at|Hused_at];
-  destruct Hused_at as [Hn Hr]; subst n;
-  remember func_defined_at as H eqn:Eh; clear Eh;
-  repeat match goal with
-  | [ H: DefinedAt _ ?n ?v /\ _ |- exists _, _ ] =>
-    destruct H as [H' H]
-  | [ Hr: ?v = r, H': DefinedAt _ ?n ?v |- _ ] =>
-    exists n; subst r; split; [apply H'|clear H']; try clear H
-  | [ H: DefinedAt _ _ _ |- exists _, _ ] => clear H
-  end;
-  remember func_bb as H eqn:Eh; clear Eh;
-  repeat match goal with
-  | [ H: BasicBlock _ ?header ?node /\ _ |- Dominates _ ?node _ ] =>
-    destruct H as [Hfrom H]
-  | [ H: BasicBlock _ ?header ?node |- Dominates _ ?node _ ] =>
-    destruct H as [Hfrom H]
-
-  | [ H: BasicBlock _ ?header ?node /\ _ |- Dominates _ _ ?node ] =>
-    destruct H as [Hto H]
-  | [ H: BasicBlock _ ?header ?node |- Dominates _ _ ?node ] =>
-    destruct H as [Hto H]
-
-  | [ H: BasicBlock _ _ _ /\ _ |- Dominates _ _ ?node ] =>
-    destruct H as [_ H]
-  end;
-  try clear H; match goal with
-  | [ Hfrom: BasicBlock _ ?header ?from, Hto: BasicBlock _ ?header ?to |- _ ] =>
-    clear Hfrom; repeat bb_dom_step func func_bb_headers_inversion Hto
-  | [ |- Dominates _ ?n ?n ] =>
-    apply dom_self
-  | [ Hfrom: BasicBlock _ ?b ?e, Hto: BasicBlock _ ?b' ?e' |- Dominates _ ?e ?e' ] =>
-    apply bb_elem_dom with (h := b) (h' := b'); auto;
-    [ intros contra; inversion contra
-    | generalize (correct_implies_dom func func_dominator_solution func_dominator_solution_correct);
-      intros Hdoms;
-      apply bb_has_header in Hfrom;
-      apply bb_has_header in Hto;
-      remember (func_dominator_solution ! b') as some_doms_n eqn:Esome_doms_n;
-      compute in Esome_doms_n;
-      destruct some_doms_n as [doms_n|]; inversion Esome_doms_n;
-      generalize (Hdoms b' b doms_n Hto Hfrom Esome_doms_n); intros Hds;
-      apply Hds; subst doms_n; unfold In; intuition
-    ]
-  end.
-  
 Theorem fib_uses_have_defs: uses_have_defs fib.
-Proof. uses_have_defs_proof
-    fib
-    fib_used_at_inversion
-    fib_defined_at
-    fib_bb
-    fib_bb_headers_inversion
-    fib_dominator_solution
-    fib_dominator_solution_correct. Qed.
+Proof. uses_have_defs_proof fib fib_used_at_inversion fib_defined_at fib_bb fib_bb_headers_inversion fib_dominator_solution fib_dominator_solution_correct. Qed.
+

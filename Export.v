@@ -418,14 +418,11 @@ Ltac bb_dom_step func func_bb_headers Hbb :=
           | [ H: pred = ?h |- Dominates _ ?h _ ] =>
             clear Epreds Hsucc;
             subst pred;
-            destruct Hinv as [_ Hdom];
-            apply sdom_dom; [auto|intros contra; inversion contra]
+            destruct Hinv as [_ Hdom]; auto
           | [ |- _ ] =>
             destruct Hinv as [Hbb Hdom];
-            apply sdom_trans with (m := pred); subst pred;
-            [ clear Hsucc Hdom H
-            | apply sdom_dom; [auto|intros contra; inversion contra]
-            ]
+            apply dom_trans with (m := pred); subst pred; auto;
+            clear Hsucc Hdom H
           end
         ]
     end
@@ -484,4 +481,40 @@ Ltac uses_have_defs_proof
       generalize (Hdoms b' b doms_n Hto Hfrom Esome_doms_n); intros Hds;
       apply Hds; subst doms_n; unfold In; intuition
     ]
+  end.
+
+Ltac bb_proof func func_inst_inversion func_bb_headers :=
+  repeat split;
+  repeat match goal with
+  | [ |- BasicBlock _ ?h ?h ] => apply bb_header; apply func_bb_headers
+  | [ |- BasicBlock _ ?h ?e ] =>
+    remember (get_predecessors func e) as preds eqn:Epreds; compute in Epreds;
+    match goal with
+    | [ H: preds = [?n] |- _ ] =>
+      remember n as pred eqn:Hpred; try rewrite Hpred; clear Epreds preds;
+      apply bb_elem with (prev := pred); subst pred;
+      simpl;
+      match goal with
+      | [ |- forall _, _ ] =>
+        intros pred' Hsucc; unfold SuccOf in Hsucc;
+        remember ((fn_insts func) ! pred') as inst eqn:Einst;
+        apply func_inst_inversion in Einst;
+        repeat (destruct Einst as [[Eprev Ei]|Einst];
+          [ subst inst pred'; compute in Hsucc;
+            repeat destruct Hsucc as [Hsucc|Hsucc];
+            try reflexivity; try inversion Hsucc
+          |]);
+          subst inst; inversion Hsucc
+      | [ |- ?a <> ?b ] =>
+        intros contra; inversion contra
+      | [ |- ~ TermAt _ _ ] =>
+        compute; intros contra; inversion contra
+      | [ |- SuccOf _ _ _ ] =>
+        compute; reflexivity
+      | [ |- None = None ] =>
+        reflexivity
+      | [ |- _ ] =>
+        idtac
+      end
+    end
   end.
