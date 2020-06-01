@@ -135,7 +135,7 @@ Section LOAD_PROPERTIES.
       apply used_at_inst with (i := LLSt addr1 src next0); auto.
       unfold InstUses; auto.
     }
-    destruct H_f_valid as [Huses_have_defs _].
+    destruct H_f_valid as [Huses_have_defs Huniq].
     unfold uses_have_defs in Huses_have_defs.
     generalize (Huses_have_defs orig src Hused_at).
     intros Hdef.
@@ -147,8 +147,14 @@ Section LOAD_PROPERTIES.
       apply defined_at_inst with (i := LLLd addr dst next); auto.
       unfold InstDefs; auto.
     }
-    apply sdom_trans with (m := orig).
-    apply Hdom. apply Hsdom.
+    apply sdom_dom.
+    apply dom_trans with (m := orig); auto. inversion Hsdom; auto.
+    intros contra.
+    subst.
+    inversion Hsdom.
+    subst.
+    generalize (dom_antisym f k orig Hdom DOM).
+    intros contra. contradiction.
   Qed.
 
   Lemma propagate_chain_sdom:
@@ -440,7 +446,7 @@ Section PROPAGATE_PROPERTIES.
     split;
       intro Hdom; inversion Hdom;
       subst;
-      apply sdom_path; try apply STRICT; apply preserves_dom; apply DOM.
+      apply sdom_dom; try apply STRICT; apply preserves_dom; apply DOM.
   Qed.
 
   Lemma preserves_defs:
@@ -587,7 +593,7 @@ Section PROPAGATE_PROPERTIES.
           rewrite Heqf'.
           split.
           + apply preserves_defs. apply Hdef.
-          + apply preserves_sdom. apply Hdom.
+          + apply preserves_dom. apply Hdom.
         }
         {
           assert (Hchain: chain loads r' r).
@@ -612,9 +618,9 @@ Section PROPAGATE_PROPERTIES.
           }
           {
             rewrite Heqf'.
-            apply preserves_sdom.
+            apply preserves_dom.
             clear Huse_implies_def.
-            apply sdom_trans with (m := kd). apply Hdom.
+            apply dom_trans with (m := kd). inversion Hdom; auto.
             assert (Hused_at_r': UsedAt f use r').
             { apply used_at_inst with (i := i_use). apply Hin. apply Huse. }
             apply defs_dominate_uses with (r := r').
@@ -646,7 +652,7 @@ Section PROPAGATE_PROPERTIES.
           rewrite Heqf'.
           split.
           + apply preserves_defs. auto.
-          + apply preserves_sdom. auto.
+          + apply preserves_dom. auto.
         }
         {
           assert (Hchain: chain loads r' r).
@@ -671,9 +677,9 @@ Section PROPAGATE_PROPERTIES.
           }
           {
             rewrite Heqf'.
-            apply preserves_sdom.
+            apply preserves_dom.
             clear Huse_implies_def.
-            apply sdom_trans with (m := kd). apply Hdom.
+            apply dom_trans with (m := kd). inversion Hdom; auto.
             assert (Hused_at_r': UsedAt f use r').
             { apply used_at_phi with (block := block) (phis := phis'). apply Hin. apply Huse. }
             apply defs_dominate_uses with (r := r').

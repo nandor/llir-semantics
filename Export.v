@@ -81,6 +81,31 @@ Ltac defined_at_inversion_proof fn fn_inst_inversion fn_phi_inversion :=
     inversion PHIS
   ].
 
+Ltac defined_at_proof fn :=
+  repeat split; match goal with
+    | [ |- DefinedAt fn ?n ?n ] =>
+      remember ((fn_insts fn) ! n) as some_inst eqn:Esome_inst;
+      compute in Esome_inst;
+      destruct some_inst as [inst|];
+      inversion Esome_inst as [Einst];
+      clear Esome_inst;
+      apply defined_at_inst with (i := inst); rewrite Einst; auto;
+      unfold InstDefs; auto
+    | [ |- DefinedAt fn ?n _ ] =>
+      remember ((fn_phis fn) ! n) as some_phis eqn:Esome_phis;
+      compute in Esome_phis;
+      destruct some_phis as [phis|];
+      inversion Esome_phis as [Ephis];
+      clear Esome_phis;
+      apply defined_at_phi with (phis := phis); rewrite Ephis; auto;
+      apply Exists_exists;
+      match goal with
+      | [ HPhi: context [ LLPhi ?ins ?reg ] |- context [ PhiDefs _ ?reg] ] =>
+        exists (LLPhi ins reg)
+      end;
+      split; [unfold In|unfold PhiDefs]; intuition
+    end.
+
 Ltac defs_are_unique_proof defined_at_inversion :=
   intros def def' r Hdef Hdef';
   apply defined_at_inversion in Hdef;
@@ -179,7 +204,7 @@ Ltac block_header_proof fn fn_inv bb_reach :=
   | intros contra; inversion contra
   ].
 
-Ltac bb_headers_proof fn func_inversion :=
+Ltac bb_headers_inversion_proof fn func_inversion :=
   intros header Hbb;
   inversion Hbb as [header'' REACH TERM NODE];
   remember ((fn_insts fn) ! header) as inst eqn:Einst;
@@ -314,36 +339,30 @@ Ltac dominator_solution_proof fn solution func_bb_headers func_bb_succ_inversion
     subst some_doms_pred; (split; [reflexivity|]); subst; simpl; auto.
 
 Definition dominator_solution_dom fn doms :=
-  forall (n: node) (m: node),
+  forall (n: node) (m: node) (doms_n: list node),
     BasicBlockHeader fn n ->
     BasicBlockHeader fn m ->
-    (exists (doms_n: list node), Some doms_n = doms ! n /\ In m doms_n) ->
+    Some doms_n = doms ! n ->
+    In m doms_n ->
     BasicBlockDominates fn m n.
 
 Theorem correct_implies_dom:
   forall (f: func) (sol: PTrie.t (list node)),
     dominator_solution_correct f sol -> dominator_solution_dom f sol.
 Proof.
-  intros f sol Hcorrect n m Hbbn Hbbm Hin.
+  intros f sol Hcorrect n m doms_n Hbbn Hbbm Hsome_sol Hin.
   destruct Hcorrect as [Hentry Hheaders].
   apply bb_dom_path.
   {
     intros path Hpath.
     remember (entry f) as entry.
-    induction Hpath.
+    generalize dependent doms_n.
+    induction Hpath; intros doms_n Hdoms_n Hin.
     {
-      generalize (Hheaders n Hbbn).
-      intros [doms_n' [Hdoms_n' [Hin' Hpred]]].
-      destruct Hin as [doms_n [Hdoms_n Hin]].
-      rewrite <- Hdoms_n' in Hdoms_n.
-      inversion Hdoms_n.
-      subst n doms_n'.
-      unfold entry in *.
-      inversion Hentry as [Hentry_explicit].
-      rewrite <- Hdoms_n' in Hentry_explicit.
-      inversion Hentry_explicit as [Hdoms_n_explicit].
-      subst doms_n.
-      intuition.
+      subst. unfold entry in *.
+      rewrite <- Hentry in Hdoms_n.
+      inversion Hdoms_n. subst doms_n.
+      apply Hin.
     }
     {
       assert (Hbb_next: BasicBlockHeader f next).
@@ -353,20 +372,23 @@ Proof.
         apply HDR_FROM.
       }
       destruct (Pos.eq_dec to m) as [Eeq|Ene]. left. auto.
-      right. apply IHHpath; auto.
+      right.
+      generalize (Hheaders next Hbb_next). intros Hprev.
+      destruct Hprev as [doms_n' [Hdoms_n' [Hin' Hprev']]].
+      apply IHHpath with (doms_n := doms_n'); auto.
       {
-        destruct Hin as [doms_n' [Hdoms_n' Hin_m_doms_n]].
         generalize (Hheaders to Hbbn). intros Hdoms_next.
         destruct Hdoms_next as [doms_next [Hdoms_next [Hin_next Hpred_next]]].
-        rewrite <- Hdoms_next in Hdoms_n'.
-        inversion Hdoms_n'. subst doms_n'.
-
-        generalize (Hpred_next m Hin_m_doms_n). intros Hm.
+        rewrite <- Hdoms_next in Hdoms_n.
+        inversion Hdoms_n. subst doms_n.
+        generalize (Hpred_next m Hin). intros Hm.
         destruct Hm. contradiction.
-
         generalize (H next HD). intros Hpred.
         destruct Hpred as [doms_pred [Hdoms_pred Hin_pred]].
-        exists doms_pred. split; auto.
+        rewrite <- Hdoms_n' in Hdoms_pred.
+        inversion Hdoms_pred.
+        subst doms_pred.
+        auto.
       }
     }
   }
@@ -374,3 +396,92 @@ Proof.
     inversion Hbbn. apply REACH.
   }
 Qed.
+
+Ltac bb_dom_step func func_bb_headers Hbb :=
+  match goal with
+  | [ |- Dominates _ _ ?node ] =>
+    remember (get_predecessors func node) as preds eqn:Epreds; compute in Epreds;
+    match goal with
+    | [ H: preds = [?n] |- _ ] =>
+      remember n as pred eqn:Epred;
+      try rewrite Epred in Hbb;
+      try rewrite Epred;
+      clear Epreds preds;
+      assert (Hsucc: SuccOf func pred node); [subst pred; compute; reflexivity|];
+      apply bb_elem_pred in Hbb;
+      destruct Hbb as [H|H];
+        [ apply func_bb_headers in H;
+          repeat destruct H as [H|H];
+          inversion H
+        | generalize (H pred Hsucc); intros Hinv;
+          match goal with
+          | [ H: pred = ?h |- Dominates _ ?h _ ] =>
+            clear Epreds Hsucc;
+            subst pred;
+            destruct Hinv as [_ Hdom];
+            apply sdom_dom; [auto|intros contra; inversion contra]
+          | [ |- _ ] =>
+            destruct Hinv as [Hbb Hdom];
+            apply sdom_trans with (m := pred); subst pred;
+            [ clear Hsucc Hdom H
+            | apply sdom_dom; [auto|intros contra; inversion contra]
+            ]
+          end
+        ]
+    end
+  end.
+
+Ltac uses_have_defs_proof
+    func
+    func_used_at_inversion
+    func_defined_at
+    func_bb
+    func_bb_headers_inversion
+    func_dominator_solution
+    func_dominator_solution_correct :=
+  intros n r Hused_at;
+  apply func_used_at_inversion in Hused_at;
+  repeat destruct Hused_at as [Hused_at|Hused_at];
+  destruct Hused_at as [Hn Hr]; subst n;
+  remember func_defined_at as H eqn:Eh; clear Eh;
+  repeat match goal with
+  | [ H: DefinedAt _ ?n ?v /\ _ |- exists _, _ ] =>
+    destruct H as [H' H]
+  | [ Hr: ?v = r, H': DefinedAt _ ?n ?v |- _ ] =>
+    exists n; subst r; split; [apply H'|clear H']; try clear H
+  | [ H: DefinedAt _ _ _ |- exists _, _ ] => clear H
+  end;
+  remember func_bb as H eqn:Eh; clear Eh;
+  repeat match goal with
+  | [ H: BasicBlock _ ?header ?node /\ _ |- Dominates _ ?node _ ] =>
+    destruct H as [Hfrom H]
+  | [ H: BasicBlock _ ?header ?node |- Dominates _ ?node _ ] =>
+    destruct H as [Hfrom H]
+
+  | [ H: BasicBlock _ ?header ?node /\ _ |- Dominates _ _ ?node ] =>
+    destruct H as [Hto H]
+  | [ H: BasicBlock _ ?header ?node |- Dominates _ _ ?node ] =>
+    destruct H as [Hto H]
+
+  | [ H: BasicBlock _ _ _ /\ _ |- Dominates _ _ ?node ] =>
+    destruct H as [_ H]
+  end;
+  try clear H; match goal with
+  | [ Hfrom: BasicBlock _ ?header ?from, Hto: BasicBlock _ ?header ?to |- _ ] =>
+    clear Hfrom; repeat bb_dom_step func func_bb_headers_inversion Hto
+  | [ |- Dominates _ ?n ?n ] =>
+    apply dom_self
+  | [ Hfrom: BasicBlock _ ?b ?e, Hto: BasicBlock _ ?b' ?e' |- Dominates _ ?e ?e' ] =>
+    apply bb_elem_dom with (h := b) (h' := b'); auto;
+    [ intros contra; inversion contra
+    | generalize (correct_implies_dom func func_dominator_solution func_dominator_solution_correct);
+      intros Hdoms;
+      apply bb_has_header in Hfrom;
+      apply bb_has_header in Hto;
+      remember (func_dominator_solution ! b') as some_doms_n eqn:Esome_doms_n;
+      compute in Esome_doms_n;
+      destruct some_doms_n as [doms_n|]; inversion Esome_doms_n;
+      generalize (Hdoms b' b doms_n Hto Hfrom Esome_doms_n); intros Hds;
+      apply Hds; subst doms_n; unfold In; intuition
+    ]
+  end.

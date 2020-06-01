@@ -346,39 +346,29 @@ Proof.
   {
     intros Hsucc.
     unfold SuccOf in Hsucc.
-    destruct ((fn_insts f) ! pred) as [inst|] eqn:Epred.
-    {
-      destruct ((fn_insts f) ! n) as [inst'|] eqn:En.
-      {
-        unfold Succeeds in Hsucc.
-        unfold get_predecessors.
-        rewrite En.
-        destruct inst; try destruct exn; repeat match goal with
-        | [ H: _ \/ _ |- _ ] =>
-          destruct H
-        | [ H: Some _ = Some _ |- _ ] =>
-          inversion H; clear H
-        | [ H: ?next = n |- _ ] =>
-          apply PTrie.values_correct with (k := next)
-        | [ H: (fn_insts f) ! pred = Some ?inst |- _ ] =>
-          apply PTrie.keys_correct with (v := inst);
-          apply PTrie.filter_correct;
-            [ symmetry; apply Epred
-            | apply List.existsb_exists; exists n;
-              split;
-              [ simpl; auto
-              | apply Pos.eqb_refl
-              ]
-            ]
-        end.
-        inversion H.
-      }
-      {
-        inversion Hsucc.
-      }
-    }
-    {
-      inversion Hsucc.
-    }
+    destruct ((fn_insts f) ! pred) as [inst|] eqn:Epred; [|inversion Hsucc].
+    destruct ((fn_insts f) ! n) as [inst'|] eqn:En; [|inversion Hsucc].
+    unfold Succeeds in Hsucc.
+    unfold get_predecessors.
+    rewrite En.
+    destruct inst; try destruct exn; repeat match goal with
+    | [ H: _ \/ _ |- _ ] =>
+      destruct H
+    | [ H: Some _ = Some _ |- _ ] =>
+      inversion H; clear H
+    | [ H: ?next = n |- _ ] =>
+      apply PTrie.values_correct with (k := next)
+    | [ H: (fn_insts f) ! pred = Some ?inst |- _ ] =>
+      apply PTrie.keys_correct with (v := inst);
+      apply PTrie.filter_correct;
+        [ symmetry; apply Epred
+        | apply List.existsb_exists; exists n;
+          split;
+          [ simpl; auto
+          | apply Pos.eqb_refl
+          ]
+        ]
+    end.
+    inversion H.
   }
 Qed.

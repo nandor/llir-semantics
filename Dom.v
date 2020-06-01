@@ -214,7 +214,7 @@ Section FUNCTION.
     .
 
   Inductive StrictlyDominates: node -> node -> Prop :=
-    | sdom_path:
+    | sdom_dom:
         forall (a: node) (b: node)
           (DOM: Dominates a b)
           (STRICT: a <> b),
@@ -279,7 +279,7 @@ Section FUNCTION.
     intros n m Hnm Hmn.
     destruct (Pos.eq_dec m n) as [|Ene]. apply e.
     apply sdom_not_dom in Hnm. inversion Hnm.
-    apply sdom_path. apply Hmn. apply Ene.
+    apply sdom_dom. apply Hmn. apply Ene.
   Qed.
 
   Theorem dom_trans:
@@ -335,6 +335,16 @@ Section FUNCTION.
     inversion contra.
     apply STRICT.
     reflexivity.
+  Qed.
+
+  Theorem sdom_dominates:
+    forall (n: node) (m: node),
+      StrictlyDominates n m ->
+      Dominates n m.
+  Proof.
+    intros n m Hsdom.
+    inversion Hsdom.
+    apply DOM.
   Qed.
 
   Inductive BasicBlockHeader: node -> Prop :=
@@ -435,6 +445,39 @@ Section FUNCTION.
     }
   Qed.
 
+  Theorem bb_elem_pred:
+    forall (header: node) (elem: node),
+      BasicBlock header elem ->
+        BasicBlockHeader elem
+        \/
+        forall (prev: node),
+          SuccOf f prev elem ->
+            BasicBlock header prev /\ Dominates prev elem.
+  Proof.
+    intros header elem Hblock.
+    inversion Hblock.
+    { left. auto. }
+    {
+      right.
+      intros prev' Hsucc.
+      apply UNIQ in Hsucc.
+      subst prev'.
+      split; auto.
+      apply dom_path.
+      {
+        intros p Hpath.
+        inversion Hpath; subst. contradiction.
+        right.
+        apply UNIQ in HD. subst next.
+        apply last_in_path with (x := entry). apply TL.
+      }
+      {
+        apply reach_succ with (a := prev). apply PRED.
+        apply bb_reaches with (header := header). apply BLOCK.
+      }
+    }
+  Qed.
+
   Inductive BasicBlockSucc: node -> node -> Prop :=
     | basic_block_succ:
       forall (from: node) (to: node) (term: node)
@@ -468,6 +511,20 @@ Section FUNCTION.
         (REACH: Reachable b),
         BasicBlockDominates a b
     .
+
+  Theorem bb_dom_dom:
+    forall (n: node) (m: node),
+      BasicBlockDominates n m -> Dominates n m.
+  Admitted.
+
+  Theorem bb_elem_dom:
+    forall (h: node) (e: node) (h': node) (e': node),
+      h <> h' ->
+      BasicBlock h e ->
+      BasicBlock h' e' ->
+      BasicBlockDominates h h' ->
+      Dominates e e'.
+  Admitted.
 End FUNCTION.
 
 Lemma eq_cfg_dom:
