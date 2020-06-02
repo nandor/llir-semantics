@@ -20,14 +20,17 @@ Import ListNotations.
 
 
 
-Definition find_load_reg (insts: inst_map) (rs: reaching_stores) (aa: points_to_set): PTrie.t reg :=
+Definition find_load_reg 
+    (insts: inst_map) 
+    (rs: ReachingStores.t) 
+    (aa: Aliasing.t): PTrie.t reg :=
   PTrie.extract (PTrie.map_opt
     (fun k inst =>
       match inst with
       | LLLd addr dst next =>
-        match get_load_addr aa addr with
+        match Aliasing.get_precise_addr aa addr with
         | Some obj =>
-          match get_store_to rs k obj with
+          match ReachingStores.get_store_to rs k obj with
           | Some src => Some (dst, src)
           | None => None
           end
@@ -59,8 +62,8 @@ Definition rewrite_phis (phis: phi_map) (loads: PTrie.t reg): phi_map :=
   PTrie.map (fun k phis => rewrite_phi_block phis loads) phis.
 
 Definition propagate_store_to_load (f: func): func :=
-  let aa := local_pta f in
-  let rs := analyse_reaching_stores f aa in
+  let aa := Aliasing.analyse f in
+  let rs := ReachingStores.analyse f aa in
   let loads := closure (find_load_reg f.(fn_insts) rs aa) in
   let fn_insts := rewrite_insts f.(fn_insts) loads in
   let fn_phis := rewrite_phis f.(fn_phis) loads in
@@ -68,8 +71,8 @@ Definition propagate_store_to_load (f: func): func :=
 
 Section LOAD_PROPERTIES.
   Variable f: func.
-  Variable rs: reaching_stores.
-  Variable aa: points_to_set.
+  Variable aa: Aliasing.t.
+  Variable rs: ReachingStores.t.
   Variable loads: relation.
   Variable loads': relation.
 
@@ -91,8 +94,8 @@ Section LOAD_PROPERTIES.
     forall (dst: reg) (src: reg),
       Some src = loads ! dst ->
         exists (k: node) (addr: reg) (object: positive) (offset: positive),
-          loads_from f aa k dst addr object offset /\
-          store_reaches rs k src object offset.
+          Aliasing.loads_from f aa k dst addr object offset /\
+          ReachingStores.store_reaches rs k src object offset.
   Proof.
     intros src dst Helem.
     subst loads.
@@ -103,16 +106,16 @@ Section LOAD_PROPERTIES.
     destruct Helem as [inst].
     destruct H as [Hinst Hfunc].
     destruct inst; inversion Hfunc; clear H0.
-    destruct (get_load_addr aa addr) eqn:Hload; inversion Hfunc; clear H0.
-    destruct (get_store_to rs k o) eqn:Hstore; inversion Hfunc; clear H0.
+    destruct (Aliasing.get_precise_addr aa addr) eqn:Hload; inversion Hfunc; clear H0.
+    destruct (ReachingStores.get_store_to rs k o) eqn:Hstore; inversion Hfunc; clear H0.
     destruct o as [object offset].
     exists addr. exists object. exists offset.
     inversion Hfunc.
     rewrite <- H0 in *.
     rewrite <- H2 in Hstore.
     split.
-    - apply load with (next := next). symmetry. apply Hload. apply Hinst.
-    - apply store. symmetry. subst. apply Hstore.
+    - apply Aliasing.load with (next := next). symmetry. apply Hload. apply Hinst.
+    - apply ReachingStores.store. symmetry. subst. apply Hstore.
   Qed.
 
   Lemma propagate_sdom:
@@ -127,7 +130,7 @@ Section LOAD_PROPERTIES.
     apply propagate_src_dst in Hin.
     destruct Hin as [k [addr [object [offset [Hload Hstore]]]]].
     inversion Hload.
-    apply reaching_store_origin with (f := f) (aa := aa) in Hstore.
+    apply ReachingStores.reaching_store_origin with (f := f) (aa := aa) in Hstore.
     destruct Hstore as [orig [Hst_at Hsdom]].
     inversion Hst_at.
     assert (Hused_at: UsedAt f orig src).
@@ -387,8 +390,8 @@ Section PROPAGATE_PROPERTIES.
       SuccOf f src dst <->
       SuccOf (propagate_store_to_load f) src dst.
   Proof.
-    remember (local_pta f) as aa.
-    remember (analyse_reaching_stores f aa) as rs.
+    remember (Aliasing.analyse f) as aa.
+    remember (ReachingStores.analyse f aa) as rs.
     remember ((find_load_reg (fn_insts f) rs aa)) as loads.
     intros src dst.
     split.
@@ -489,8 +492,8 @@ Section PROPAGATE_PROPERTIES.
       inversion Hdef.
       {
         unfold propagate_store_to_load, rewrite_insts.
-        remember (local_pta f) as aa.
-        remember (analyse_reaching_stores f aa) as rs.
+        remember (Aliasing.analyse f) as aa.
+        remember (ReachingStores.analyse f aa) as rs.
         remember ((find_load_reg (fn_insts f) rs aa)) as loads.
         remember (closure loads) as loads'.
         apply defined_at_inst with (i := rewrite_inst i loads').
@@ -509,8 +512,8 @@ Section PROPAGATE_PROPERTIES.
       {
         apply Exists_exists in DEFS.
         destruct DEFS as [phi [Hin_phi Hdef_phi]].
-        remember (local_pta f) as aa.
-        remember (analyse_reaching_stores f aa) as rs.
+        remember (Aliasing.analyse f) as aa.
+        remember (ReachingStores.analyse f aa) as rs.
         remember ((find_load_reg (fn_insts f) rs aa)) as loads.
         remember (closure loads) as loads'.
         apply defined_at_phi with (phis := rewrite_phi_block phis loads').
@@ -549,8 +552,8 @@ Section PROPAGATE_PROPERTIES.
     is_valid (propagate_store_to_load f).
   Proof.
     remember (propagate_store_to_load f) as f'.
-    remember (local_pta f) as aa.
-    remember (analyse_reaching_stores f aa) as rs.
+    remember (Aliasing.analyse f) as aa.
+    remember (ReachingStores.analyse f aa) as rs.
     remember ((find_load_reg (fn_insts f) rs aa)) as loads.
     remember (closure loads) as loads'.
     destruct H_f_valid as [Hdefs Huniq].
@@ -573,7 +576,7 @@ Section PROPAGATE_PROPERTIES.
         apply PTrie.map_in in INST.
         destruct INST as [i_use [Hin Hwr]].
         generalize (propagate_inst_use_inversion
-          f rs aa loads loads'
+          f aa rs loads loads'
           H_f_valid Heqloads Heqloads'
           i_use i r Hwr USES).
         intros Hinv.
@@ -602,7 +605,7 @@ Section PROPAGATE_PROPERTIES.
             symmetry. apply Hsubst.
           }
           generalize (propagate_chain_sdom
-            f rs aa loads loads'
+            f aa rs loads loads'
             H_f_valid
             Heqloads Heqloads'
             r' r
@@ -661,7 +664,7 @@ Section PROPAGATE_PROPERTIES.
             symmetry. apply Hsubst.
           }
           generalize (propagate_chain_sdom
-            f rs aa loads loads'
+            f aa rs loads loads'
             H_f_valid
             Heqloads Heqloads'
             r' r
