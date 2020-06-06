@@ -23,7 +23,8 @@ PROOFS=\
 	Dom.vo\
 	Eval.vo\
 	Aliasing.vo\
-	Verify.vo\
+	Typing.vo\
+	SSA.vo\
 	ReachingStores.vo\
 	StoreToLoad.vo\
 	test/fibonacci.vo

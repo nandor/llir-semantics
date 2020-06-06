@@ -81,9 +81,9 @@ Ltac defined_at_inversion_proof fn fn_inst_inversion fn_phi_inversion :=
     inversion PHIS
   ].
 
-Ltac defined_at_proof fn :=
+Ltac defined_at_proof :=
   repeat split; match goal with
-    | [ |- DefinedAt fn ?n ?n ] =>
+    | [ |- DefinedAt ?fn ?n ?n ] =>
       remember ((fn_insts fn) ! n) as some_inst eqn:Esome_inst;
       compute in Esome_inst;
       destruct some_inst as [inst|];
@@ -91,7 +91,7 @@ Ltac defined_at_proof fn :=
       clear Esome_inst;
       apply defined_at_inst with (i := inst); rewrite Einst; auto;
       unfold InstDefs; auto
-    | [ |- DefinedAt fn ?n _ ] =>
+    | [ |- DefinedAt ?fn ?n _ ] =>
       remember ((fn_phis fn) ! n) as some_phis eqn:Esome_phis;
       compute in Esome_phis;
       destruct some_phis as [phis|];
@@ -100,8 +100,8 @@ Ltac defined_at_proof fn :=
       apply defined_at_phi with (phis := phis); rewrite Ephis; auto;
       apply Exists_exists;
       match goal with
-      | [ HPhi: context [ LLPhi ?ins ?reg ] |- context [ PhiDefs _ ?reg] ] =>
-        exists (LLPhi ins reg)
+      | [ HPhi: context [ LLPhi (?ty, ?reg) ?ins ] |- context [ PhiDefs _ ?reg] ] =>
+        exists (LLPhi (ty, reg) ins)
       end;
       split; [unfold In|unfold PhiDefs]; intuition
     end.

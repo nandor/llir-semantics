@@ -1,4 +1,6 @@
-unsigned fib(unsigned n) {
+
+int fib(unsigned n)
+{
   unsigned a = 0, b = 1;
   while (n--) {
     unsigned c = a + b;

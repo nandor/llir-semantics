@@ -2,66 +2,79 @@
 (* Licensing information is available in the LICENSE file. *)
 (* (C) 2020 Nandor Licker. All rights reserved. *)
 
+Require Import Coq.Lists.List.
 Require Import Coq.ZArith.ZArith.
 Require Import Coq.Init.Nat.
 
 Require Import LLIR.State.
 Require Import LLIR.LLIR.
+Require Import LLIR.Values.
+Require Import LLIR.Maps.
+Require Import LLIR.Typing.
+
+Import ListNotations.
 
 
 
-Fixpoint step (p: prog) (st: state) (tr: trace): (state * trace) :=
-  (st, tr).
+Inductive syscall := .
 
+Definition syscall_handler: Type := state -> syscall -> (state * qword).
+
+Definition step_inst
+  (f: func)
+  (fr: frame)
+  (frs: list frame)
+  (i: inst): option state :=
+  None.
 (*
-Inductive star : prog -> state -> state -> Prop :=
-  | star_refl :
-    forall (p: prog) (s: state),
-    star p s s
-  | star_step :
-    forall (p: prog) (s: state) (s': state) (s'': state),
-    star p s s' ->
-    step p s' = s'' ->
-    star p s s''
-  .
+  match i with
+  | LLArg dest next idx =>
+    None
 
-Inductive starN : nat -> prog -> state -> state -> Prop :=
-  | starN_refl :
-    forall (p: prog) (s: state),
-    starN 0 p s s
-  | starN_step :
-    forall (n: nat) (p: prog) (s: state) (s': state) (s'': state),
-    starN n p s s' ->
-    step p s' = s'' ->
-    starN (S n) p s s''
-  .
+  | LLInt32 dst next val =>
+    None
 
-Remark starN_star :
-  forall p s s',
-  (exists n, starN n p s s') -> star p s s'.
-Proof.
-  intros p s s'.
-  intros H.
-  destruct H.
-  induction H.
-  - constructor.
-  - apply (star_step p s s').
-    + apply IHstarN.
-    + apply H0.
-Qed.
+  | LLUnop (ty, dst) next op arg =>
+    None
 
-Remark star_starN :
-  forall p s s',
-  star p s s' -> exists n, starN n p s s'.
-Proof.
-  intros p s s'.
-  intros H.
-  induction H.
-  - exists 0. constructor.
-  - destruct IHstar.
-    exists (S x).
-    apply (starN_step x p s s').
-    + apply H1.
-    + apply H0.
-Qed.
+  | LLBinop (ty, dst) next op lhs rhs=>
+    None
+
+  | LLJcc cond bt bf =>
+    None
+
+  | LLRet val =>
+    None
+
+  | LLJmp target =>
+    None
+
+  (* TODO *)
+  | LLInvoke callee args dst next exn => None
+  | LLLd addr dst next => None
+  | LLSt addr val next => None
+  | LLInt8 val dst next => None
+  | LLInt16 val dst next => None
+  | LLFrame obj dst next => None
+  | LLGlobal obj dst next => None
+  | LLRetVoid => None
+  | LLInt64 val dst next => None
+  | LLUndef (ty, dst) next => None
+  end.
 *)
+
+Definition step (p: prog) (st: state) (sys: syscall_handler): option state :=
+  match st.(st_stack) with
+  | fr :: frs =>
+    match p ! (fr.(fr_func)) with
+    | Some fn =>
+      match fn.(fn_insts) ! (fr.(fr_pc)) with
+      | Some inst =>
+        step_inst fn fr frs inst
+      | None =>
+        None
+      end
+    | _ => None
+    end
+  | _ => None
+  end.

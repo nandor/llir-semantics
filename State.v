@@ -22,12 +22,12 @@ Record frame := mkframe
   { fr_data: PTrie.t atom
   ; fr_regs: PTrie.t qword
   ; fr_args: PTrie.t qword
+  ; fr_func: positive
+  ; fr_pc: node
   }.
 
 Record state :=
-  { st_data: PTrie.t atom
-  ; st_heap: PTrie.t atom
-  ; st_stack: PTrie.t frame
+  { st_stack: list frame
   }.
 
 

@@ -11,7 +11,7 @@ Require Import LLIR.Maps.
 Require Import LLIR.Closure.
 Require Import LLIR.State.
 Require Import LLIR.Values.
-Require Import LLIR.Verify.
+Require Import LLIR.SSA.
 Require Import LLIR.ReachingStores.
 Require Import LLIR.Dom.
 Require Import LLIR.Transform.
@@ -20,14 +20,14 @@ Import ListNotations.
 
 
 
-Definition find_load_reg 
-    (insts: inst_map) 
-    (rs: ReachingStores.t) 
+Definition find_load_reg
+    (insts: inst_map)
+    (rs: ReachingStores.t)
     (aa: Aliasing.t): PTrie.t reg :=
   PTrie.extract (PTrie.map_opt
     (fun k inst =>
       match inst with
-      | LLLd addr dst next =>
+      | LLLd (ty, dst) next addr =>
         match Aliasing.get_precise_addr aa addr with
         | Some obj =>
           match ReachingStores.get_store_to rs k obj with
@@ -105,17 +105,15 @@ Section LOAD_PROPERTIES.
     apply PTrie.map_opt_inversion in Helem.
     destruct Helem as [inst].
     destruct H as [Hinst Hfunc].
-    destruct inst; inversion Hfunc; clear H0.
+    destruct inst; inversion Hfunc. destruct dst0.
     destruct (Aliasing.get_precise_addr aa addr) eqn:Hload; inversion Hfunc; clear H0.
     destruct (ReachingStores.get_store_to rs k o) eqn:Hstore; inversion Hfunc; clear H0.
     destruct o as [object offset].
     exists addr. exists object. exists offset.
-    inversion Hfunc.
-    rewrite <- H0 in *.
-    rewrite <- H2 in Hstore.
+    inversion Hfunc; subst.
     split.
-    - apply Aliasing.load with (next := next). symmetry. apply Hload. apply Hinst.
-    - apply ReachingStores.store. symmetry. subst. apply Hstore.
+    - apply Aliasing.load with (next := next) (t := t); [symmetry|]; assumption.
+    - apply ReachingStores.store. symmetry. assumption.
   Qed.
 
   Lemma propagate_sdom:
@@ -147,7 +145,7 @@ Section LOAD_PROPERTIES.
     split. apply Hdefs.
     split.
     {
-      apply defined_at_inst with (i := LLLd addr dst next); auto.
+      apply defined_at_inst with (i := LLLd (t, dst) next addr); auto.
       unfold InstDefs; auto.
     }
     apply sdom_dom.
@@ -227,7 +225,6 @@ Section LOAD_PROPERTIES.
     unfold InstUses in Huses.
     unfold InstUses.
     destruct user eqn:Euser;
-      destruct Huses;
       repeat match goal with
       | [ |- context [loads' ! ?reg] ] =>
         destruct (loads' ! reg) eqn:?reg
@@ -239,6 +236,12 @@ Section LOAD_PROPERTIES.
         rewrite H0 in H1; inversion H1
       | [ H: ?a = ?b |- _ ] =>
         subst b
+      | [ H: (_ = r) \/ _ |- _ ] =>
+        destruct H
+      | [ H: False |- _ ] =>
+        inversion H
+      | [ dst: ty * reg |- _] =>
+        destruct dst
       | [ |- _ ] =>
         auto
       end.
@@ -288,6 +291,14 @@ Section LOAD_PROPERTIES.
           subst. left. split; auto.
         }
       }
+    - destruct value; simpl in Huser'; simpl in Huses; try inversion Huses.
+      destruct (loads' ! p0) eqn:Ep.
+      + right. exists p0. subst. auto.
+      + subst p0. rewrite Ep in r0. inversion r0.
+    - destruct value; simpl in Huser'; simpl in Huses; try inversion Huses.
+      destruct (loads' ! p) eqn:Ep.
+      + subst p0. right. exists p. auto.
+      + left. auto.
   Qed.
 
   Lemma propagate_phi_use_inversion:
@@ -369,7 +380,7 @@ Section LOAD_PROPERTIES.
     intros Hinv.
     destruct Hinv as [[Hloads Huse]|[r' [Hloads Huse]]].
     {
-      left. split; auto. 
+      left. split; auto.
       unfold PhiBlockUses. apply Exists_exists.
       exists phi; auto.
     }
@@ -408,7 +419,7 @@ Section PROPAGATE_PROPERTIES.
       destruct ((fn_insts f) ! dst) as [inst'|]; try inversion Hsucc.
       unfold rewrite_inst_uses. simpl.
       unfold Succeeds in *.
-      destruct inst; subst; auto.
+      destruct inst; try destruct dst0; subst; auto.
     }
     {
       intros Hsucc.
@@ -423,7 +434,7 @@ Section PROPAGATE_PROPERTIES.
       destruct ((fn_insts f) ! dst) as [inst'|]; try inversion Hsucc.
       simpl in Hsucc.
       unfold Succeeds in *.
-      destruct inst; subst; auto.
+      destruct inst; try destruct dst0; subst; auto.
     }
   Qed.
 
@@ -460,13 +471,13 @@ Section PROPAGATE_PROPERTIES.
     split.
     {
       intro Hdef'; inversion Hdef'.
-      { 
+      {
         unfold propagate_store_to_load, rewrite_insts in INST.
         simpl in INST. apply PTrie.map_in in INST.
         destruct INST as [inst [Hloc Hdef]]. subst i.
         apply defined_at_inst with (i := inst). apply Hloc.
         unfold rewrite_inst, rewrite_inst_uses, InstDefs in DEFS. unfold InstDefs.
-        destruct inst; auto.
+        destruct inst; try destruct dst; auto.
       }
       {
         unfold propagate_store_to_load, rewrite_phis in PHIS.
@@ -506,7 +517,7 @@ Section PROPAGATE_PROPERTIES.
         }
         {
           unfold InstDefs in *.
-          destruct i; auto.
+          destruct i; try destruct dst; auto.
         }
       }
       {
@@ -586,7 +597,7 @@ Section PROPAGATE_PROPERTIES.
         {
           assert (Huse_at: UsedAt f use r).
           {
-            apply used_at_inst with (i := i_use). 
+            apply used_at_inst with (i := i_use).
             + rewrite <- Hin. reflexivity.
             + apply Huse.
           }
@@ -645,7 +656,7 @@ Section PROPAGATE_PROPERTIES.
         {
           assert (Huse_at: UsedAt f use r).
           {
-            apply used_at_phi with (block := block) (phis := phis'). 
+            apply used_at_phi with (block := block) (phis := phis').
             apply Hin.
             apply Huses.
           }

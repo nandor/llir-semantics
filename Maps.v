@@ -493,7 +493,7 @@ Module PTrie <: PARTIAL_MAP.
       subst v0.
       apply Hr.
     Qed.
-  End VALUES.      
+  End VALUES.
 
   Section KEYS.
     Variable V: Type.
@@ -620,6 +620,30 @@ Module PTrie <: PARTIAL_MAP.
     Qed.
 
   End COMBINE.
+
+  Section UNION.
+    Variable V: Type.
+
+    Fixpoint union (a: t V) (b: t V): t V :=
+      match a, b with
+      | Leaf, b =>
+        b
+      | Node _ _ _, Leaf =>
+        a
+      | Node al av ar, Node bl bv br =>
+        let v :=
+          match av, bv with
+          | Some _, None => av
+          | _, _ => bv
+          end
+        in Node (union al bl) v (union ar br)
+      end.
+
+    Theorem union_correct:
+      forall (a: t V) (b: t V) (k: key) (v: V),
+        get (union a b) k = Some v -> get a k = Some v \/ get b k = Some v.
+    Admitted.
+  End UNION.
 
   Section EXTENSIONAL_EQUALITY.
     Variable V: Type.

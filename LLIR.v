@@ -58,28 +58,26 @@ Inductive binop : Type :=
   .
 
 Inductive inst : Type :=
-  | LLInvoke (callee: reg) (args: list reg) (dst: reg) (next: node) (exn: option node)
-  | LLLd (addr: reg) (dst: reg) (next: node)
-  | LLSt (addr: reg) (val: reg) (next: node)
-  | LLArg (index: nat) (dst: reg) (next: node)
-  | LLInt8 (value: INT8.t) (dst: reg) (next: node)
-  | LLInt16 (value: INT16.t) (dst: reg) (next: node)
-  | LLInt32 (value: INT32.t) (dst: reg) (next: node)
-  | LLInt64 (value: INT64.t) (dst: reg) (next: node)
-  | LLFrame (object: positive) (dst: reg) (next: node)
-  | LLGlobal (object: positive) (dst: reg) (next: node)
-  | LLExtern (id: positive) (next: node)
-  | LLRet (value: reg)
-  | LLRetVoid
+  | LLLd (dst: (ty * reg)) (next: node) (addr: reg)
+  | LLArg (dst: (ty * reg)) (next: node) (index: nat)
+  | LLInt8 (dst: reg) (next: node) (value: INT8.t)
+  | LLInt16 (dst: reg) (next: node) (value: INT16.t)
+  | LLInt32 (dst: reg) (next: node) (value: INT32.t)
+  | LLInt64 (dst: reg) (next: node) (value: INT64.t)
+  | LLFrame (dst: reg) (next: node) (object: positive)
+  | LLGlobal (dst: reg) (next: node) (object: positive)
+  | LLUndef (dst: (ty * reg)) (next: node)
+  | LLUnop (dst: (ty * reg)) (next: node) (op: unop) (arg: reg)
+  | LLBinop (dst: (ty * reg)) (next: node) (op: binop) (lhs: reg) (rhs: reg)
+  | LLInvoke (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: option node)
+  | LLSt (next: node) (addr: reg) (val: reg)
+  | LLRet (value: option reg)
   | LLJcc (cond: reg) (bt: node) (bf: node)
   | LLJmp (target: node)
-  | LLUndef (ty: ty) (dst: reg) (next: node)
-  | LLUnop (ty: ty) (op: unop) (arg: reg) (dst: reg) (next: node)
-  | LLBinop (ty: ty) (op: binop) (lhs: reg) (rhs: reg) (dst: reg) (next: node)
   .
 
 Inductive phi : Type :=
-  | LLPhi (ins: list (node * reg)) (dst: reg)
+  | LLPhi (dst: (ty * reg)) (ins: list (node * reg))
   .
 
 Definition inst_map := PTrie.t inst.
@@ -98,35 +96,37 @@ Definition prog : Type := PTrie.t func.
 
 Definition InstDefs (i: inst) (r: reg): Prop :=
   match i with
-  | LLLd _ dst _ => dst = r
+  | LLLd (_, dst) _ _ => dst = r
+  | LLArg (_, dst) _ _ => dst = r
+  | LLInt8 dst _ _ => dst = r
+  | LLInt16 dst _ _ => dst = r
+  | LLInt32 dst _ _ => dst = r
+  | LLInt64 dst _ _ => dst = r
+  | LLFrame dst _ _ => dst = r
+  | LLGlobal dst _ _ => dst = r
+  | LLUndef (_, dst) _ => dst = r
+  | LLUnop (_, dst) _ _ _ => dst = r
+  | LLBinop (_, dst) _ _ _ _ => dst = r
+  | LLInvoke ret _ _ _ _ =>
+    match ret with
+    | None => False
+    | Some (_, dst) => dst = r
+    end
   | LLSt _ _ _ => False
-  | LLArg _ dst _ => dst = r
-  | LLInt8 _ dst _ => dst = r
-  | LLInt16 _ dst _ => dst = r
-  | LLInt32 _ dst _ => dst = r
-  | LLInt64 _ dst _ => dst = r
-  | LLFrame _ dst _ => dst = r
-  | LLGlobal _ dst _ => dst = r
-  | LLExtern _ _ => False
-  | LLInvoke _ _ dst _ _ => dst = r
   | LLRet _ => False
-  | LLRetVoid => False
   | LLJcc _ _ _ => False
   | LLJmp _ => False
-  | LLUndef _ dst _ => dst = r
-  | LLUnop _ _ _ dst _ => dst = r
-  | LLBinop _ _ _ _ dst _ => dst = r
   end.
+
 
 Definition PhiDefs (i: phi) (r: reg): Prop :=
   match i with
-  | LLPhi _ dst => r = dst
+  | LLPhi (_, dst) _ => r = dst
   end.
 
 Definition InstUses (i: inst) (r: reg): Prop :=
   match i with
-  | LLLd addr _ _ => addr = r
-  | LLSt addr val _ => addr = r \/ val = r
+  | LLLd _ _ addr => addr = r
   | LLArg _ _ _ => False
   | LLInt8 _ _ _ => False
   | LLInt16 _ _ _ => False
@@ -134,59 +134,58 @@ Definition InstUses (i: inst) (r: reg): Prop :=
   | LLInt64 _ _ _ => False
   | LLFrame _ _ _ => False
   | LLGlobal _ _ _ => False
-  | LLExtern _ _ => False
-  | LLInvoke callee args _ _ _ => callee = r \/ In r args
-  | LLRet value => value = r
-  | LLRetVoid => False
+  | LLUndef _ _ => False
+  | LLUnop _ _ _ arg => arg = r
+  | LLBinop _ _ _ lhs rhs => lhs = r \/ rhs = r
+  | LLInvoke _ _ callee args _ => callee = r \/ In r args
+  | LLSt _ addr val => addr = r \/ val = r
+  | LLRet value =>
+    match value with
+    | None => False
+    | Some value' => value' = r
+    end
   | LLJcc cond _ _ => cond = r
   | LLJmp _ => False
-  | LLUndef _ _ _ => False
-  | LLUnop _ _ arg _ _ => arg = r
-  | LLBinop _ _ lhs rhs _ _ => lhs = r \/ rhs = r
   end.
 
 Definition PhiUses (p: phi) (n: reg) (r: reg): Prop :=
   match p with
-  | LLPhi ins _ => Exists (fun phi_in =>
+  | LLPhi _ ins => Exists (fun phi_in =>
     match phi_in with
     | (n', r') => n' = n /\ r' = r
     end) ins
   end.
 
 Definition PhiBlockUses (phis: list phi) (n: node) (r: reg): Prop :=
-    Exists (fun phi => PhiUses phi n r) phis.
+  Exists (fun phi => PhiUses phi n r) phis.
 
 Definition Succeeds (i: inst) (succ: node): Prop :=
   match i with
-  | LLLd _ _ next => next = succ
-  | LLSt _ _ next => next = succ
-  | LLArg _ _ next => next = succ
-  | LLInt8 _ _ next => next = succ
-  | LLInt16 _ _ next => next = succ
-  | LLInt32 _ _ next => next = succ
-  | LLInt64 _ _ next => next = succ
-  | LLFrame _ _ next => next = succ
-  | LLGlobal _ _ next => next = succ
-  | LLExtern _ next => next = succ
-  | LLInvoke _ _ _ next exn => next = succ \/ exn = Some succ
+  | LLLd _ next _ => next = succ
+  | LLArg _ next _ => next = succ
+  | LLInt8 _ next _ => next = succ
+  | LLInt16 _ next _ => next = succ
+  | LLInt32 _ next _ => next = succ
+  | LLInt64 _ next _ => next = succ
+  | LLFrame _ next _ => next = succ
+  | LLGlobal _ next _ => next = succ
+  | LLUndef _ next => next = succ
+  | LLUnop _ next _ _ => next = succ
+  | LLBinop _ next _ _ _ => next = succ
+  | LLInvoke _ next _ _ exn =>
+    match exn with
+    | None => next = succ
+    | Some exn' => next = succ \/ exn' = succ
+    end
+  | LLSt next _ _ => next = succ
   | LLRet _ => False
-  | LLRetVoid => False
   | LLJcc _ bt bf => bt = succ \/ bf = succ
   | LLJmp target => target = succ
-  | LLUndef _ _ next => next = succ
-  | LLUnop _ _ _ _ next => next = succ
-  | LLBinop _ _ _ _ _ next => next = succ
   end.
 
 Definition is_terminator (i: inst): bool :=
   match i with
-  | LLInvoke _ _ _ _ _ => true
-  | LLRet _ => true
-  | LLRetVoid => true
-  | LLJcc _ _ _ => true
-  | LLJmp _ => true
   | LLLd _ _ _ => false
-  | LLSt _ _ _ => false
   | LLArg _ _ _ => false
   | LLInt8 _ _ _ => false
   | LLInt16 _ _ _ => false
@@ -194,10 +193,14 @@ Definition is_terminator (i: inst): bool :=
   | LLInt64 _ _ _ => false
   | LLFrame _ _ _ => false
   | LLGlobal _ _ _ => false
-  | LLExtern _ _ => false
-  | LLUndef _ _ _ => false
-  | LLUnop _ _ _ _ _ => false
-  | LLBinop _ _ _ _ _ _ => false
+  | LLUndef _ _ => false
+  | LLUnop _ _ _ _ => false
+  | LLBinop _ _ _ _ _ => false
+  | LLInvoke _ _ _ _ _ => true
+  | LLSt next _ _ => false
+  | LLRet _ => true
+  | LLJcc _ _ _ => true
+  | LLJmp _ => true
   end.
 
 Definition Terminator (i: inst): Prop :=
@@ -247,25 +250,28 @@ Section FUNCTION.
 End FUNCTION.
 
 Definition get_successors (i: inst) :=
+
   match i with
-  | LLLd _ _ next => [next]
-  | LLSt _ _ next => [next]
-  | LLArg _ _ next => [next]
-  | LLInt8 _ _ next => [next]
-  | LLInt16 _ _ next => [next]
-  | LLInt32 _ _ next => [next]
-  | LLInt64 _ _ next => [next]
-  | LLFrame _ _ next => [next]
-  | LLGlobal _ _ next => [next]
-  | LLExtern _ next => [next]
-  | LLInvoke _ _ _ next (Some exn) => [next; exn]
-  | LLInvoke _ _ _ next _ => [next]
-  | LLJcc _ bt bf => [bt; bf]
+  | LLLd _ next _ => [next]
+  | LLArg _ next _ => [next]
+  | LLInt8 _ next _ => [next]
+  | LLInt16 _ next _ => [next]
+  | LLInt32 _ next _ => [next]
+  | LLInt64 _ next _ => [next]
+  | LLFrame _ next _ => [next]
+  | LLGlobal _ next _ => [next]
+  | LLUndef _ next => [next]
+  | LLUnop _ next _ _ => [next]
+  | LLBinop _ next _ _ _ => [next]
+  | LLInvoke _ next _ _ exn =>
+    match exn with
+    | None => [next]
+    | Some exn' => [next; exn']
+    end
+  | LLSt next _ _ => [next]
+  | LLRet _ => []
+  | LLJcc _ bt bf => [bt;bf]
   | LLJmp target => [target]
-  | LLUndef _ _ next => [next]
-  | LLUnop _ _ _ _ next => [next]
-  | LLBinop _ _ _ _ _ next => [next]
-  | _ => []
   end.
 
 Lemma get_successors_correct:
@@ -369,6 +375,5 @@ Proof.
           ]
         ]
     end.
-    inversion H.
   }
 Qed.

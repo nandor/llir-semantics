@@ -34,12 +34,12 @@ Module Aliasing.
 
     Inductive loads_from: reg -> reg -> reg -> positive -> positive -> Prop :=
       | load:
-        forall (k: node) (val: reg) (addr: reg)
+        forall (k: node) (dst: reg) (addr: reg) (t: ty)
                (object: positive) (offset: positive)
                (next: node),
           Some (Object object offset) = get_precise_addr aa addr ->
-          Some (LLLd addr val next) = f.(fn_insts) ! k ->
-          loads_from k val addr object offset
+          Some (LLLd (t, dst) next addr) = f.(fn_insts) ! k ->
+          loads_from k dst addr object offset
       .
   End PROPERTIES.
 End Aliasing.

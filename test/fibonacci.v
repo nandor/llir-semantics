@@ -2,7 +2,7 @@ Require Import Coq.ZArith.ZArith.
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 Require Import LLIR.Values.
-Require Import LLIR.Verify.
+Require Import LLIR.SSA.
 Require Import LLIR.State.
 Require Import LLIR.Export.
 Require Import LLIR.Dom.
@@ -13,45 +13,37 @@ Definition fib: func :=
   {| fn_stack :=
     << >>
   ; fn_insts :=
-    << (1%positive, LLArg 0 1%positive 2%positive)
-    ;  (2%positive, LLInt32 (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O))))) 2%positive 3%positive)
-    ;  (3%positive, LLInt32 (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, I))))) 3%positive 4%positive)
-    ;  (4%positive, LLBinop I8 LLCmp 1%positive 2%positive 4%positive 5%positive)
+    << (1%positive, LLArg (I32, 1%positive) 2%positive 0)
+    ;  (2%positive, LLInt32 2%positive 3%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O))))))
+    ;  (3%positive, LLInt32 3%positive 4%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, I))))))
+    ;  (4%positive, LLBinop (I8, 4%positive) 5%positive LLCmp 1%positive 2%positive )
     ;  (5%positive, LLJcc 4%positive 17%positive 6%positive)
-    ;  (6%positive, LLInt32 (((((I, I), (I, I)), ((I, I), (I, I))), (((I, I), (I, I)), ((I, I), (I, I)))), ((((I, I), (I, I)), ((I, I), (I, I))), (((I, I), (I, I)), ((I, I), (I, I))))) 6%positive 7%positive)
-    ;  (7%positive, LLInt32 (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O))))) 7%positive 8%positive)
+    ;  (6%positive, LLInt32 6%positive 7%positive (((((I, I), (I, I)), ((I, I), (I, I))), (((I, I), (I, I)), ((I, I), (I, I)))), ((((I, I), (I, I)), ((I, I), (I, I))), (((I, I), (I, I)), ((I, I), (I, I))))))
+    ;  (7%positive, LLInt32 7%positive 8%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O))))))
     ;  (8%positive, LLJmp 12%positive)
-    ;  (12%positive, LLBinop I32 LLAdd 9%positive 11%positive 12%positive 13%positive)
-    ;  (13%positive, LLBinop I32 LLAdd 10%positive 6%positive 13%positive 14%positive)
-    ;  (14%positive, LLBinop I8 LLCmp 13%positive 2%positive 14%positive 15%positive)
+    ;  (12%positive, LLBinop (I32, 12%positive) 13%positive LLAdd 9%positive 11%positive )
+    ;  (13%positive, LLBinop (I32, 13%positive) 14%positive LLAdd 10%positive 6%positive )
+    ;  (14%positive, LLBinop (I8, 14%positive) 15%positive LLCmp 13%positive 2%positive )
     ;  (15%positive, LLJcc 14%positive 12%positive 17%positive)
-    ;  (17%positive, LLRet 16%positive)
+    ;  (17%positive, LLRet (Some 16%positive))
     >>
   ; fn_phis := 
     << (12%positive
-       , [ LLPhi
-           [ (8%positive, 3%positive)
+       , [ LLPhi (I32, 9%positive) [ (8%positive, 3%positive)
            ; (15%positive, 12%positive)
            ]
-           9%positive
-         ; LLPhi
-           [ (8%positive, 1%positive)
+         ; LLPhi (I32, 10%positive) [ (8%positive, 1%positive)
            ; (15%positive, 13%positive)
            ]
-           10%positive
-         ; LLPhi
-           [ (8%positive, 7%positive)
+         ; LLPhi (I32, 11%positive) [ (8%positive, 7%positive)
            ; (15%positive, 9%positive)
            ]
-           11%positive
          ]
        )
     ;  (17%positive
-       , [ LLPhi
-           [ (5%positive, 3%positive)
+       , [ LLPhi (I32, 16%positive) [ (5%positive, 3%positive)
            ; (15%positive, 12%positive)
            ]
-           16%positive
          ]
        )
     >>
@@ -61,31 +53,31 @@ Definition fib: func :=
 Theorem fib_inst_inversion:
   forall (inst: option inst) (n: node),
   inst = (fn_insts fib) ! n ->
-    (1%positive = n /\ Some (LLArg 0 1%positive 2%positive) = inst)
+    (1%positive = n /\ Some (LLArg (I32, 1%positive) 2%positive 0) = inst)
     \/
-    (2%positive = n /\ Some (LLInt32 (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O))))) 2%positive 3%positive) = inst)
+    (2%positive = n /\ Some (LLInt32 2%positive 3%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))))) = inst)
     \/
-    (3%positive = n /\ Some (LLInt32 (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, I))))) 3%positive 4%positive) = inst)
+    (3%positive = n /\ Some (LLInt32 3%positive 4%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, I)))))) = inst)
     \/
-    (4%positive = n /\ Some (LLBinop I8 LLCmp 1%positive 2%positive 4%positive 5%positive) = inst)
+    (4%positive = n /\ Some (LLBinop (I8, 4%positive) 5%positive LLCmp 1%positive 2%positive ) = inst)
     \/
     (5%positive = n /\ Some (LLJcc 4%positive 17%positive 6%positive) = inst)
     \/
-    (6%positive = n /\ Some (LLInt32 (((((I, I), (I, I)), ((I, I), (I, I))), (((I, I), (I, I)), ((I, I), (I, I)))), ((((I, I), (I, I)), ((I, I), (I, I))), (((I, I), (I, I)), ((I, I), (I, I))))) 6%positive 7%positive) = inst)
+    (6%positive = n /\ Some (LLInt32 6%positive 7%positive (((((I, I), (I, I)), ((I, I), (I, I))), (((I, I), (I, I)), ((I, I), (I, I)))), ((((I, I), (I, I)), ((I, I), (I, I))), (((I, I), (I, I)), ((I, I), (I, I)))))) = inst)
     \/
-    (7%positive = n /\ Some (LLInt32 (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O))))) 7%positive 8%positive) = inst)
+    (7%positive = n /\ Some (LLInt32 7%positive 8%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))))) = inst)
     \/
     (8%positive = n /\ Some (LLJmp 12%positive) = inst)
     \/
-    (12%positive = n /\ Some (LLBinop I32 LLAdd 9%positive 11%positive 12%positive 13%positive) = inst)
+    (12%positive = n /\ Some (LLBinop (I32, 12%positive) 13%positive LLAdd 9%positive 11%positive ) = inst)
     \/
-    (13%positive = n /\ Some (LLBinop I32 LLAdd 10%positive 6%positive 13%positive 14%positive) = inst)
+    (13%positive = n /\ Some (LLBinop (I32, 13%positive) 14%positive LLAdd 10%positive 6%positive ) = inst)
     \/
-    (14%positive = n /\ Some (LLBinop I8 LLCmp 13%positive 2%positive 14%positive 15%positive) = inst)
+    (14%positive = n /\ Some (LLBinop (I8, 14%positive) 15%positive LLCmp 13%positive 2%positive ) = inst)
     \/
     (15%positive = n /\ Some (LLJcc 14%positive 12%positive 17%positive) = inst)
     \/
-    (17%positive = n /\ Some (LLRet 16%positive) = inst)
+    (17%positive = n /\ Some (LLRet (Some 16%positive)) = inst)
     \/
     inst = None.
 Proof. inst_inversion_proof fib. Qed.
@@ -93,9 +85,9 @@ Proof. inst_inversion_proof fib. Qed.
 Theorem fib_phi_inversion:
   forall (phis: option (list phi)) (n: node),
   phis = (fn_phis fib) ! n ->
-    (12%positive = n /\ Some [LLPhi [ (8%positive, 3%positive); (15%positive, 12%positive)] 9%positive; LLPhi [ (8%positive, 1%positive); (15%positive, 13%positive)] 10%positive; LLPhi [ (8%positive, 7%positive); (15%positive, 9%positive)] 11%positive] = phis)
+    (12%positive = n /\ Some [LLPhi (I32, 9%positive) [ (8%positive, 3%positive); (15%positive, 12%positive)]; LLPhi (I32, 10%positive) [ (8%positive, 1%positive); (15%positive, 13%positive)]; LLPhi (I32, 11%positive) [ (8%positive, 7%positive); (15%positive, 9%positive)]] = phis)
     \/
-    (17%positive = n /\ Some [LLPhi [ (5%positive, 3%positive); (15%positive, 12%positive)] 16%positive] = phis)
+    (17%positive = n /\ Some [LLPhi (I32, 16%positive) [ (5%positive, 3%positive); (15%positive, 12%positive)]] = phis)
     \/
     phis = None.
 Proof. phi_inversion_proof fib. Qed.
@@ -156,7 +148,7 @@ Theorem fib_defined_at:
   DefinedAt fib 12%positive 11%positive
   /\
   DefinedAt fib 17%positive 16%positive.
-Proof. defined_at_proof fib. Qed.
+Proof. defined_at_proof. Qed.
 
 Theorem fib_used_at_inversion:
   forall (n: node) (r: reg),

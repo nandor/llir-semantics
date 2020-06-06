@@ -23,7 +23,6 @@ Module DOUBLE (BASE : VALUE).
 End DOUBLE.
 
 Module INT1 <: VALUE.
-
   Definition t := bit.
 End INT1.
 
@@ -60,4 +59,7 @@ Inductive qword : Type :=
 
 Inductive value : Type :=
   | Val8 (v: INT8.t)
+  | Val16 (v: INT16.t)
+  | Val32 (v: INT32.t)
+  | Val64 (v: INT64.t)
   .

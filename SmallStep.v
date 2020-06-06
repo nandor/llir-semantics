@@ -95,7 +95,7 @@ Inductive step: state -> trace -> state -> Prop :=
       (ty: ty) (op: unop) (arg: reg) (dst: reg) (next: node)
       (arg_value: value) (dst_value: value)
       (stk': stk_state),
-      get_inst stk pc = Some (LLUnop ty op arg dst next) ->
+      get_inst stk pc = Some (LLUnop (ty, dst) next op arg) ->
       get_vreg stk arg = Some arg_value ->
       eval_unop ty op arg_value = Some dst_value ->
       set_vreg stk dst dst_value = Some stk' ->
@@ -110,7 +110,7 @@ Inductive step: state -> trace -> state -> Prop :=
       (ty: ty) (op: binop) (lhs: reg) (rhs: reg) (dst: reg) (next: node)
       (lhs_value: value) (rhs_value: value) (dst_value: value)
       (stk': stk_state),
-      get_inst stk pc = Some (LLBinop ty op lhs rhs dst next) ->
+      get_inst stk pc = Some (LLBinop (ty, dst) next op lhs rhs) ->
       get_vreg stk lhs = Some lhs_value ->
       get_vreg stk rhs = Some rhs_value ->
       eval_binop ty op lhs_value rhs_value = Some dst_value ->

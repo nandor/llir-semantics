@@ -9,47 +9,57 @@ Require Import LLIR.Maps.
 Require Import LLIR.State.
 Require Import LLIR.Aliasing.
 Require Import LLIR.LLIR.
-Require Import LLIR.Verify.
 
 
 
 Definition rewrite_inst_uses (i: inst) (f: reg -> reg): inst :=
   match i with
-  | LLLd addr dst next => LLLd (f addr) dst next
-  | LLSt addr val next => LLSt (f addr) (f val) next
-  | LLArg index dst next => i
+  | LLArg _ _ _ => i
   | LLInt8 _ _ _ => i
   | LLInt16 _ _ _ => i
   | LLInt32 _ _ _ => i
   | LLInt64 _ _ _ => i
-  | LLFrame object dst next => i
-  | LLGlobal object dst next => i
-  | LLExtern id next => i
-  | LLInvoke t args dst next exn => LLInvoke (f t) (List.map f args) dst next exn
-  | LLRet value => LLRet (f value)
-  | LLRetVoid => LLRetVoid
-  | LLJcc cond bt bf => LLJcc (f cond) bt bf
-  | LLJmp target => i
-  | LLUndef _ _ _ => i
-  | LLUnop ty op arg dst next => LLUnop ty op (f arg) dst next
-  | LLBinop ty op lhs rhs dst next => LLBinop ty op (f lhs) (f rhs) dst next
+  | LLJmp _ => i
+  | LLUndef _ _ => i
+  | LLFrame _ _ _ => i
+  | LLGlobal _ _ _ => i
+  | LLLd dst next addr =>
+    LLLd dst next (f addr)
+  | LLSt next addr val =>
+    LLSt next (f addr) (f val)
+  | LLInvoke dst next callee args exn =>
+    LLInvoke dst next (f callee) (List.map f args) exn
+  | LLRet value =>
+    LLRet (option_map f value)
+  | LLJcc cond bt bf =>
+    LLJcc (f cond) bt bf
+  | LLUnop (ty, dst) next op arg =>
+    LLUnop (ty, dst) next op (f arg)
+  | LLBinop (ty, dst) next op lhs rhs =>
+    LLBinop (ty, dst) next op (f lhs) (f rhs)
   end.
 
 Theorem inst_use_rewritten:
   forall (i: inst) (r: reg) (f: reg -> reg),
     InstUses i r -> InstUses (rewrite_inst_uses i f) (f r).
 Proof.
-  destruct i; intros src f Huse; simpl; inversion Huse; try rewrite H; auto.
-  right. apply List.in_map_iff. exists src.
-  split. reflexivity. apply H.
+  destruct i; intros src f Huse; 
+    simpl; 
+    try unfold InstUses in *; try destruct dst; try destruct Huse;
+    subst; auto.
+  - right. apply in_map_iff. exists src. auto.
+  - right. apply in_map_iff. exists src. auto.
+  - destruct value; simpl.
+    + subst. reflexivity.
+    + inversion Huse.
 Qed.
 
 Definition rewrite_phi_uses (p: phi) (f: reg -> reg): phi :=
   match p with
-  | LLPhi ins dst => LLPhi (List.map (fun phi_in =>
+  | LLPhi dst ins => LLPhi dst (List.map (fun phi_in =>
     match phi_in with
     | (block, r) => (block, f r)
-    end) ins) dst
+    end) ins)
   end.
 
 Theorem phi_use_rewritten:
