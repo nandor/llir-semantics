@@ -6,6 +6,7 @@ Require Import LLIR.SSA.
 Require Import LLIR.State.
 Require Import LLIR.Export.
 Require Import LLIR.Dom.
+Require Import LLIR.Typing.
 Require Import Coq.Lists.List.
 Import ListNotations.
 
@@ -13,35 +14,35 @@ Definition fib: func :=
   {| fn_stack :=
     << >>
   ; fn_insts :=
-    << (1%positive, LLArg (I32, 1%positive) 2%positive 0)
+    << (1%positive, LLArg (TInt I32, 1%positive) 2%positive 0)
     ;  (2%positive, LLInt32 2%positive 3%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O))))))
     ;  (3%positive, LLInt32 3%positive 4%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, I))))))
-    ;  (4%positive, LLBinop (I8, 4%positive) 5%positive LLCmp 1%positive 2%positive )
+    ;  (4%positive, LLBinop (TInt I8, 4%positive) 5%positive LLCmp 1%positive 2%positive )
     ;  (5%positive, LLJcc 4%positive 17%positive 6%positive)
     ;  (6%positive, LLInt32 6%positive 7%positive (((((I, I), (I, I)), ((I, I), (I, I))), (((I, I), (I, I)), ((I, I), (I, I)))), ((((I, I), (I, I)), ((I, I), (I, I))), (((I, I), (I, I)), ((I, I), (I, I))))))
     ;  (7%positive, LLInt32 7%positive 8%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O))))))
     ;  (8%positive, LLJmp 12%positive)
-    ;  (12%positive, LLBinop (I32, 12%positive) 13%positive LLAdd 9%positive 11%positive )
-    ;  (13%positive, LLBinop (I32, 13%positive) 14%positive LLAdd 10%positive 6%positive )
-    ;  (14%positive, LLBinop (I8, 14%positive) 15%positive LLCmp 13%positive 2%positive )
+    ;  (12%positive, LLBinop (TInt I32, 12%positive) 13%positive LLAdd 9%positive 11%positive )
+    ;  (13%positive, LLBinop (TInt I32, 13%positive) 14%positive LLAdd 10%positive 6%positive )
+    ;  (14%positive, LLBinop (TInt I8, 14%positive) 15%positive LLCmp 13%positive 2%positive )
     ;  (15%positive, LLJcc 14%positive 12%positive 17%positive)
     ;  (17%positive, LLRet (Some 16%positive))
     >>
   ; fn_phis := 
     << (12%positive
-       , [ LLPhi (I32, 9%positive) [ (8%positive, 3%positive)
+       , [ LLPhi (TInt I32, 9%positive) [ (8%positive, 3%positive)
            ; (15%positive, 12%positive)
            ]
-         ; LLPhi (I32, 10%positive) [ (8%positive, 1%positive)
+         ; LLPhi (TInt I32, 10%positive) [ (8%positive, 1%positive)
            ; (15%positive, 13%positive)
            ]
-         ; LLPhi (I32, 11%positive) [ (8%positive, 7%positive)
+         ; LLPhi (TInt I32, 11%positive) [ (8%positive, 7%positive)
            ; (15%positive, 9%positive)
            ]
          ]
        )
     ;  (17%positive
-       , [ LLPhi (I32, 16%positive) [ (5%positive, 3%positive)
+       , [ LLPhi (TInt I32, 16%positive) [ (5%positive, 3%positive)
            ; (15%positive, 12%positive)
            ]
          ]
@@ -53,13 +54,13 @@ Definition fib: func :=
 Theorem fib_inst_inversion:
   forall (inst: option inst) (n: node),
   inst = (fn_insts fib) ! n ->
-    (1%positive = n /\ Some (LLArg (I32, 1%positive) 2%positive 0) = inst)
+    (1%positive = n /\ Some (LLArg (TInt I32, 1%positive) 2%positive 0) = inst)
     \/
     (2%positive = n /\ Some (LLInt32 2%positive 3%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))))) = inst)
     \/
     (3%positive = n /\ Some (LLInt32 3%positive 4%positive (((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, O)))), ((((O, O), (O, O)), ((O, O), (O, O))), (((O, O), (O, O)), ((O, O), (O, I)))))) = inst)
     \/
-    (4%positive = n /\ Some (LLBinop (I8, 4%positive) 5%positive LLCmp 1%positive 2%positive ) = inst)
+    (4%positive = n /\ Some (LLBinop (TInt I8, 4%positive) 5%positive LLCmp 1%positive 2%positive ) = inst)
     \/
     (5%positive = n /\ Some (LLJcc 4%positive 17%positive 6%positive) = inst)
     \/
@@ -69,11 +70,11 @@ Theorem fib_inst_inversion:
     \/
     (8%positive = n /\ Some (LLJmp 12%positive) = inst)
     \/
-    (12%positive = n /\ Some (LLBinop (I32, 12%positive) 13%positive LLAdd 9%positive 11%positive ) = inst)
+    (12%positive = n /\ Some (LLBinop (TInt I32, 12%positive) 13%positive LLAdd 9%positive 11%positive ) = inst)
     \/
-    (13%positive = n /\ Some (LLBinop (I32, 13%positive) 14%positive LLAdd 10%positive 6%positive ) = inst)
+    (13%positive = n /\ Some (LLBinop (TInt I32, 13%positive) 14%positive LLAdd 10%positive 6%positive ) = inst)
     \/
-    (14%positive = n /\ Some (LLBinop (I8, 14%positive) 15%positive LLCmp 13%positive 2%positive ) = inst)
+    (14%positive = n /\ Some (LLBinop (TInt I8, 14%positive) 15%positive LLCmp 13%positive 2%positive ) = inst)
     \/
     (15%positive = n /\ Some (LLJcc 14%positive 12%positive 17%positive) = inst)
     \/
@@ -85,9 +86,9 @@ Proof. inst_inversion_proof fib. Qed.
 Theorem fib_phi_inversion:
   forall (phis: option (list phi)) (n: node),
   phis = (fn_phis fib) ! n ->
-    (12%positive = n /\ Some [LLPhi (I32, 9%positive) [ (8%positive, 3%positive); (15%positive, 12%positive)]; LLPhi (I32, 10%positive) [ (8%positive, 1%positive); (15%positive, 13%positive)]; LLPhi (I32, 11%positive) [ (8%positive, 7%positive); (15%positive, 9%positive)]] = phis)
+    (12%positive = n /\ Some [LLPhi (TInt I32, 9%positive) [ (8%positive, 3%positive); (15%positive, 12%positive)]; LLPhi (TInt I32, 10%positive) [ (8%positive, 1%positive); (15%positive, 13%positive)]; LLPhi (TInt I32, 11%positive) [ (8%positive, 7%positive); (15%positive, 9%positive)]] = phis)
     \/
-    (17%positive = n /\ Some [LLPhi (I32, 16%positive) [ (5%positive, 3%positive); (15%positive, 12%positive)]] = phis)
+    (17%positive = n /\ Some [LLPhi (TInt I32, 16%positive) [ (5%positive, 3%positive); (15%positive, 12%positive)]] = phis)
     \/
     phis = None.
 Proof. phi_inversion_proof fib. Qed.
@@ -301,4 +302,7 @@ Proof. defs_are_unique_proof fib_defined_at_inversion. Qed.
 
 Theorem fib_uses_have_defs: uses_have_defs fib.
 Proof. uses_have_defs_proof fib fib_used_at_inversion fib_defined_at fib_bb fib_bb_headers_inversion fib_dominator_solution fib_dominator_solution_correct. Qed.
+
+Theorem fib_well_typed: X86_Typing.well_typed fib.
+Proof. X86_Proofs.well_typed fib fib_inst_inversion fib_phi_inversion. Qed.
 

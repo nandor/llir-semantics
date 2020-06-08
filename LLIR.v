@@ -17,15 +17,23 @@ Record object := mkobject
   ; obj_align: positive
   }.
 
-Inductive ty : Type :=
+Inductive ty_int: Type :=
   | I8
   | I16
   | I32
   | I64
   | I128
+  .
+
+Inductive ty_float: Type :=
   | F32
   | F64
   | F80
+  .
+
+Inductive ty : Type :=
+  | TInt (i: ty_int)
+  | TFloat (f: ty_float)
   .
 
 Inductive unop : Type :=

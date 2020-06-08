@@ -10,6 +10,7 @@ Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 Require Import LLIR.Dom.
 Require Import LLIR.State.
+Require Import LLIR.Typing.
 
 Import ListNotations.
 
@@ -518,3 +519,63 @@ Ltac bb_proof func func_inst_inversion func_bb_headers :=
       end
     end
   end.
+
+Module X86_Proofs.
+  Ltac well_typed_insts fn insts_inversion :=
+    intros n i Hin;
+    apply insts_inversion in Hin;
+    remember (X86_Typing.ty_env fn) as env eqn:Henv;
+    repeat (destruct Hin as [[Hn Hi]|Hin];
+      [ inversion Hi as [Hi'];
+        try (constructor; subst env; constructor)
+      |]);
+      try match goal with
+      | |- context [ LLBinop (?t, ?dst) _ ?op ?lhs ?rhs ] =>
+        remember (env ! lhs) as tl eqn:El; rewrite Henv in El;
+        remember (env ! rhs) as tr eqn:Er; rewrite Henv in Er;
+        compute in El; compute in Er;
+        match goal with
+        | [ El: tl = Some ?tl', Er: tr = Some ?tr' |- _ ] =>
+          apply X86_Typing.type_binop with (tl := tl') (tr := tr');
+          subst; constructor
+        end
+      | |- context [ LLJcc ?cond _ _ ] =>
+        remember (env ! cond) as tc eqn:Econd; rewrite Henv in Econd;
+        compute in Econd;
+        match goal with
+        | [ Econd: tc = Some (TInt ?tc') |- _ ] =>
+          apply X86_Typing.type_jcc with (i := tc')
+        end;
+        subst; constructor
+      | |- context [ LLRet (Some ?v) ] =>
+        remember (env ! v) as tv eqn:Ev; rewrite Henv in Ev;
+        compute in Ev;
+        match goal with
+        | [ El: tv = Some ?tv' |- _ ] =>
+          apply X86_Typing.type_ret with (t := tv')
+        end;
+        subst; constructor
+      end;
+    inversion Hin.
+
+  Ltac well_typed_phis fn phi_inversion :=
+    intros n i phi Hblocks Hin;
+    remember (X86_Typing.ty_env fn) as env eqn:Henv;
+    apply phi_inversion in Hblocks;
+    repeat (destruct Hblocks as [[Hn Hphis]|Hblocks];
+      [ inversion Hphis as [Hphis']; subst i; clear Hphis;
+        repeat (destruct Hin as [Hphi|Hin];
+          [ subst phi; constructor;
+            intros n' r H;
+            repeat destruct H as [H|H]; inversion H; subst; constructor
+          |]);
+        inversion Hin
+      |]);
+    inversion Hblocks.
+
+  Ltac well_typed fn insts_inversion phi_inversion :=
+    split;
+      [ well_typed_insts fn insts_inversion
+      | well_typed_phis fn phi_inversion
+      ].
+End X86_Proofs.
