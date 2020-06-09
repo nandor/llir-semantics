@@ -20,10 +20,11 @@ Record atom := mkdata
 
 Record frame := mkframe
   { fr_data: PTrie.t atom
-  ; fr_regs: PTrie.t qword
-  ; fr_args: PTrie.t qword
+  ; fr_regs: PTrie.t value
+  ; fr_args: PTrie.t value
   ; fr_func: positive
   ; fr_pc: node
+  ; fr_retaddr: node
   }.
 
 Record state :=
