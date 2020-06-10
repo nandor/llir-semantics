@@ -242,63 +242,14 @@ Section LOAD_PROPERTIES.
         inversion H
       | [ dst: ty * reg |- _] =>
         destruct dst
+      | [H: In ?r ?args |- _ ] =>
+        apply in_map_iff in H;
+        destruct H as [x [Hr Hin]]
+      | [ H: context [ option_map ?f ?v ] |- _ ] =>
+        destruct value; simpl in H
       | [ |- _ ] =>
         auto
       end.
-    - right.
-      apply in_map_iff in H.
-      destruct H as [x [Hr Hin]].
-      destruct (Pos.eq_dec r x).
-      {
-        destruct (loads' ! x) eqn:E.
-        {
-          generalize (propagate_load_irrefl).
-          intros Hrefl.
-          subst r.
-          subst p0.
-          rewrite E in r0.
-          inversion r0.
-          subst p.
-          symmetry in E.
-          assert (Hchain: chain loads x x).
-          { apply H_loads_relation'. apply E. }
-          apply Hrefl in Hchain.
-          contradiction Hchain. auto.
-        }
-        {
-          subst. rewrite E in r0. inversion r0.
-        }
-      }
-      {
-        destruct (loads' ! x) eqn:E; subst.
-        * exists x. split. apply E. right. apply Hin.
-        * rewrite E in r0. inversion r0.
-      }
-    - apply in_map_iff in H.
-      destruct H as [x [Hr Hin]].
-      destruct (Pos.eq_dec r x).
-      {
-        left. rewrite e. auto.
-      }
-      {
-        destruct (loads' ! x) eqn:E.
-        {
-          subst p.
-          right. exists x.
-          split. apply E. right. apply Hin.
-        }
-        {
-          subst. left. split; auto.
-        }
-      }
-    - destruct value; simpl in Huser'; simpl in Huses; try inversion Huses.
-      destruct (loads' ! p0) eqn:Ep.
-      + right. exists p0. subst. auto.
-      + subst p0. rewrite Ep in r0. inversion r0.
-    - destruct value; simpl in Huser'; simpl in Huses; try inversion Huses.
-      destruct (loads' ! p) eqn:Ep.
-      + subst p0. right. exists p. auto.
-      + left. auto.
   Qed.
 
   Lemma propagate_phi_use_inversion:
@@ -586,10 +537,7 @@ Section PROPAGATE_PROPERTIES.
         unfold rewrite_insts in INST.
         apply PTrie.map_in in INST.
         destruct INST as [i_use [Hin Hwr]].
-        generalize (propagate_inst_use_inversion
-          f aa rs loads loads'
-          H_f_valid Heqloads Heqloads'
-          i_use i r Hwr USES).
+        generalize (propagate_inst_use_inversion loads' i_use i r Hwr USES).
         intros Hinv.
         generalize (Hdefs use r).
         intros Huse_implies_def.

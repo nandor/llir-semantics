@@ -72,16 +72,23 @@ Inductive inst : Type :=
   | LLInt16 (dst: reg) (next: node) (value: INT16.t)
   | LLInt32 (dst: reg) (next: node) (value: INT32.t)
   | LLInt64 (dst: reg) (next: node) (value: INT64.t)
-  | LLFrame (dst: reg) (next: node) (object: positive)
-  | LLGlobal (dst: reg) (next: node) (object: positive)
+  | LLMov (dst: (ty * reg)) (next: node) (src: reg)
+  | LLSelect (dst: (ty * reg)) (next: node) (cond: reg) (vt: reg) (vf: reg)
+  | LLFrame (dst: reg) (next: node) (object: positive) (offset: nat)
+  | LLGlobal (dst: reg) (next: node) (object: positive) (offset: nat)
   | LLUndef (dst: (ty * reg)) (next: node)
   | LLUnop (dst: (ty * reg)) (next: node) (op: unop) (arg: reg)
   | LLBinop (dst: (ty * reg)) (next: node) (op: binop) (lhs: reg) (rhs: reg)
-  | LLInvoke (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: option node)
+  | LLSyscall (dst: reg) (next: node) (sno: reg) (args: list reg)
+  | LLCall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg)
+  | LLInvoke (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: node)
+  | LLTCall (callee: reg) (args: list reg)
+  | LLTInvoke (callee: reg) (args: list reg) (exn: node)
   | LLSt (next: node) (addr: reg) (val: reg)
   | LLRet (value: option reg)
   | LLJcc (cond: reg) (bt: node) (bf: node)
   | LLJmp (target: node)
+  | LLTrap
   .
 
 Inductive phi : Type :=
@@ -110,20 +117,31 @@ Definition InstDefs (i: inst) (r: reg): Prop :=
   | LLInt16 dst _ _ => dst = r
   | LLInt32 dst _ _ => dst = r
   | LLInt64 dst _ _ => dst = r
-  | LLFrame dst _ _ => dst = r
-  | LLGlobal dst _ _ => dst = r
+  | LLMov (_, dst) _ _ => dst = r
+  | LLFrame dst _ _ _ => dst = r
+  | LLGlobal dst _ _ _ => dst = r
   | LLUndef (_, dst) _ => dst = r
   | LLUnop (_, dst) _ _ _ => dst = r
   | LLBinop (_, dst) _ _ _ _ => dst = r
+  | LLSelect (_, dst) _ _ _ _ => dst = r
+  | LLSyscall dst _ _ _ => dst = r
+  | LLCall ret _ _ _ =>
+    match ret with
+    | None => False
+    | Some (_, dst) => dst = r
+    end
   | LLInvoke ret _ _ _ _ =>
     match ret with
     | None => False
     | Some (_, dst) => dst = r
     end
+  | LLTCall _ _ => False
+  | LLTInvoke _ _ _ => False
   | LLSt _ _ _ => False
   | LLRet _ => False
   | LLJcc _ _ _ => False
   | LLJmp _ => False
+  | LLTrap => False
   end.
 
 
@@ -140,12 +158,18 @@ Definition InstUses (i: inst) (r: reg): Prop :=
   | LLInt16 _ _ _ => False
   | LLInt32 _ _ _ => False
   | LLInt64 _ _ _ => False
-  | LLFrame _ _ _ => False
-  | LLGlobal _ _ _ => False
+  | LLMov _ _ src => src = r
+  | LLFrame _ _ _ _ => False
+  | LLGlobal _ _ _ _ => False
   | LLUndef _ _ => False
   | LLUnop _ _ _ arg => arg = r
   | LLBinop _ _ _ lhs rhs => lhs = r \/ rhs = r
+  | LLSelect _ _ cond vt vf => cond = r \/ vt = r \/ vf = r
+  | LLSyscall _ _ sno args => sno = r \/ In r args
+  | LLCall _ _ callee args => callee = r \/ In r args
   | LLInvoke _ _ callee args _ => callee = r \/ In r args
+  | LLTCall callee args => callee = r \/ In r args
+  | LLTInvoke callee args _ => callee = r \/ In r args
   | LLSt _ addr val => addr = r \/ val = r
   | LLRet value =>
     match value with
@@ -154,6 +178,7 @@ Definition InstUses (i: inst) (r: reg): Prop :=
     end
   | LLJcc cond _ _ => cond = r
   | LLJmp _ => False
+  | LLTrap => False
   end.
 
 Definition PhiUses (p: phi) (n: reg) (r: reg): Prop :=
@@ -175,20 +200,23 @@ Definition Succeeds (i: inst) (succ: node): Prop :=
   | LLInt16 _ next _ => next = succ
   | LLInt32 _ next _ => next = succ
   | LLInt64 _ next _ => next = succ
-  | LLFrame _ next _ => next = succ
-  | LLGlobal _ next _ => next = succ
+  | LLMov _ next _ => next = succ
+  | LLFrame _ next _ _ => next = succ
+  | LLGlobal _ next _ _ => next = succ
   | LLUndef _ next => next = succ
   | LLUnop _ next _ _ => next = succ
   | LLBinop _ next _ _ _ => next = succ
-  | LLInvoke _ next _ _ exn =>
-    match exn with
-    | None => next = succ
-    | Some exn' => next = succ \/ exn' = succ
-    end
+  | LLSelect _ next _ _ _ => next = succ
+  | LLSyscall _ next _ _ => next = succ
+  | LLCall _ next _ _ => next = succ
+  | LLInvoke _ next _ _ exn => next = succ \/ exn = succ
+  | LLTCall _ _ => False
+  | LLTInvoke _ _ exn => exn = succ
   | LLSt next _ _ => next = succ
   | LLRet _ => False
   | LLJcc _ bt bf => bt = succ \/ bf = succ
   | LLJmp target => target = succ
+  | LLTrap => False
   end.
 
 Definition is_terminator (i: inst): bool :=
@@ -199,16 +227,23 @@ Definition is_terminator (i: inst): bool :=
   | LLInt16 _ _ _ => false
   | LLInt32 _ _ _ => false
   | LLInt64 _ _ _ => false
-  | LLFrame _ _ _ => false
-  | LLGlobal _ _ _ => false
+  | LLMov _ _ _ => false
+  | LLFrame _ _ _ _ => false
+  | LLGlobal _ _ _ _ => false
   | LLUndef _ _ => false
   | LLUnop _ _ _ _ => false
   | LLBinop _ _ _ _ _ => false
+  | LLSelect _ _ _ _ _ => false
+  | LLSyscall _ _ _ _ => false
+  | LLCall _ _ _ _ => false
   | LLInvoke _ _ _ _ _ => true
+  | LLTCall _ _ => true
+  | LLTInvoke _ _ _ => true
   | LLSt next _ _ => false
   | LLRet _ => true
   | LLJcc _ _ _ => true
   | LLJmp _ => true
+  | LLTrap => true
   end.
 
 Definition Terminator (i: inst): Prop :=
@@ -266,20 +301,23 @@ Definition get_successors (i: inst) :=
   | LLInt16 _ next _ => [next]
   | LLInt32 _ next _ => [next]
   | LLInt64 _ next _ => [next]
-  | LLFrame _ next _ => [next]
-  | LLGlobal _ next _ => [next]
+  | LLMov _ next _ => [next]
+  | LLFrame _ next _ _ => [next]
+  | LLGlobal _ next _ _ => [next]
   | LLUndef _ next => [next]
   | LLUnop _ next _ _ => [next]
   | LLBinop _ next _ _ _ => [next]
-  | LLInvoke _ next _ _ exn =>
-    match exn with
-    | None => [next]
-    | Some exn' => [next; exn']
-    end
+  | LLSelect _ next _ _ _ => [next]
+  | LLSyscall _ next _ _ => [next]
+  | LLCall _ next _ _ => [next]
+  | LLInvoke _ next _ _ exn => [next; exn]
+  | LLTCall _ _ => []
+  | LLTInvoke _ _ exn => [exn]
   | LLSt next _ _ => [next]
   | LLRet _ => []
   | LLJcc _ bt bf => [bt;bf]
   | LLJmp target => [target]
+  | LLTrap => []
   end.
 
 Lemma get_successors_correct:
@@ -291,14 +329,14 @@ Proof.
     intros Hin.
     unfold get_successors in Hin.
     unfold Succeeds.
-    destruct i; try destruct exn;
+    destruct i;
     repeat (destruct Hin; destruct H; subst; try inversion H; auto).
   }
   {
     intros Hsucc.
     unfold Succeeds in Hsucc.
     unfold get_successors.
-    destruct i; try destruct exn;
+    destruct i;
     try destruct Hsucc; try inversion H; subst; simpl; auto.
   }
 Qed.

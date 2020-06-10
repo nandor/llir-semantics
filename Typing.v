@@ -18,11 +18,13 @@ Definition type_env := PTrie.t ty.
 (* Interface containing all target-specific information. *)
 Module Type ArchTy.
   Parameter ptr_ty: ty.
+  Parameter syscall_ty: ty.
 End ArchTy.
 
 (* X86-specific typing. *)
 Module X86_ArchTy <: ArchTy.
   Definition ptr_ty := TInt I64.
+  Definition syscall_ty := TInt I64.
 End X86_ArchTy.
 
 (* Generic typing rules *)
@@ -38,26 +40,33 @@ Module Target_Typing (ARCH: ArchTy) <: Typing.
   (* Returns the register defined by an instruction and its type. *)
   Definition get_inst_def (i: inst): option (ty * reg) :=
     match i with
+    | LLSyscall dst _ _ _ => Some (ARCH.syscall_ty, dst)
+    | LLCall dst _ _ _ => dst
+    | LLTCall _ _ => None
     | LLInvoke dst _ _ _ _ => dst
+    | LLTInvoke _ _ _ => None
 
     | LLArg dst _ _ => Some dst
     | LLInt8 dst _ _ => Some (TInt I8, dst)
     | LLInt16 dst _ _ => Some (TInt I16, dst)
     | LLInt32 dst _ _ => Some (TInt I32, dst)
     | LLInt64 dst _ _ => Some (TInt I64, dst)
+    | LLMov dst _ _ => Some dst
 
-    | LLFrame _ dst _ => Some (ARCH.ptr_ty, dst)
-    | LLGlobal _ dst _ => Some (ARCH.ptr_ty, dst)
+    | LLFrame dst _ _ _ => Some (ARCH.ptr_ty, dst)
+    | LLGlobal dst _ _ _ => Some (ARCH.ptr_ty, dst)
 
     | LLLd dst _ _ => Some dst
     | LLUndef dst _ => Some dst
     | LLUnop dst _ _ _ => Some dst
     | LLBinop dst _ _ _ _ => Some dst
+    | LLSelect dst _ _ _ _ => Some dst
 
     | LLSt _ _ _ => None
     | LLRet _ => None
     | LLJcc _ _ _ => None
     | LLJmp _ => None
+    | LLTrap => None
     end.
 
   (* Type environment from instructions. *)
@@ -92,16 +101,20 @@ Module Target_Typing (ARCH: ArchTy) <: Typing.
 
   (* Typing rules for binary instructions. *)
   Inductive well_typed_binop: binop -> ty -> ty -> ty -> Prop :=
-    | type_bin_cmp:
+    | type_cmp:
       forall (t: ty) (dt: ty),
         well_typed_binop LLCmp t t dt
-    | type_bin_add:
+    | type_add:
       forall (t: ty),
         well_typed_binop LLAdd t t t
+    | type_sll:
+      forall (tl: ty_int) (tr: ty_int),
+        well_typed_binop LLSll (TInt tl) (TInt tr) (TInt tl)
     .
 
   (* Typing rules for unary instructions. *)
   Inductive well_typed_unop: unop -> ty -> ty -> Prop :=
+    | type_sext_i32_i64: well_typed_unop LLSext (TInt I32) (TInt I64)
     .
 
   (* Typing rules for instructions. *)
@@ -126,7 +139,8 @@ Module Target_Typing (ARCH: ArchTy) <: Typing.
         (VAL_TY: well_typed_reg env val t),
         well_typed_inst env (LLSt next addr val)
     | type_undef:
-      forall (env: type_env) (next: node) (dst: reg) (t: ty),
+      forall (env: type_env) (next: node) (dst: reg) (t: ty)
+        (DST_TY: well_typed_reg env dst t),
         well_typed_inst env (LLUndef (t, dst) next)
     | type_ld:
       forall (env: type_env) (next: node) (dst: reg) (t: ty) (addr: reg)
@@ -134,13 +148,13 @@ Module Target_Typing (ARCH: ArchTy) <: Typing.
         (DST_TY: well_typed_reg env dst t),
         well_typed_inst env (LLLd (t, dst) next addr)
     | type_frame:
-      forall (env: type_env) (dst:reg) (next: node) (object: positive)
+      forall (env: type_env) (dst:reg) (next: node) (object: positive) (offset: nat)
         (DST_TY: well_typed_reg env dst ARCH.ptr_ty),
-        well_typed_inst env (LLFrame dst next object)
+        well_typed_inst env (LLFrame dst next object offset)
     | type_global:
-      forall (env: type_env) (dst: reg) (next: node) (object: positive)
+      forall (env: type_env) (dst: reg) (next: node) (object: positive) (offset: nat)
         (DST_TY: well_typed_reg env dst ARCH.ptr_ty),
-        well_typed_inst env (LLGlobal dst next object)
+        well_typed_inst env (LLGlobal dst next object offset)
     | type_int8:
       forall (env: type_env) (dst: reg) (next: node) (val: INT8.t)
         (DST_TY: well_typed_reg env dst (TInt I8)),
@@ -173,14 +187,40 @@ Module Target_Typing (ARCH: ArchTy) <: Typing.
       forall (env: type_env) (op: unop) (next: node)
         (arg: reg) (argt: ty) (dst: reg) (t: ty)
         (ARG_TY: well_typed_reg env arg argt)
+        (DST_TY: well_typed_reg env dst t)
         (OP: well_typed_unop op argt t),
         well_typed_inst env (LLUnop (t, dst) next op arg)
     | type_invoke_void:
       forall (env: type_env) (next: node)
         (dst: reg) (t: ty)
-        (callee: reg) (args: list reg) (exn: option node)
+        (callee: reg) (args: list reg) (exn: node)
         (CALLEE_TY: well_typed_reg env callee ARCH.ptr_ty),
         well_typed_inst env (LLInvoke (Some (t, dst)) next callee args exn)
+    | type_call_void:
+      forall (env: type_env) (next: node)
+        (callee: reg) (args: list reg)
+        (CALLEE_TY: well_typed_reg env callee ARCH.ptr_ty),
+        well_typed_inst env (LLCall None next callee args)
+    | type_call:
+      forall (env: type_env) (next: node)
+        (callee: reg) (args: list reg) (dst: reg) (t: ty)
+        (CALLEE_TY: well_typed_reg env callee ARCH.ptr_ty)
+        (DST_TY: well_typed_reg env dst t),
+        well_typed_inst env (LLCall (Some (t, dst)) next callee args)
+    | type_tcall:
+      forall (env: type_env)
+        (callee: reg) (args: list reg)
+        (CALLEE_TY: well_typed_reg env callee ARCH.ptr_ty),
+        well_typed_inst env (LLTCall callee args)
+    | type_syscall:
+      forall (env: type_env) (next: node)
+        (sno: reg) (args: list reg) (tsno: ty_int) (dst: reg) (t: ty)
+        (SNO_TY: well_typed_reg env sno (TInt tsno))
+        (DST_TY: well_typed_reg env dst t),
+        well_typed_inst env (LLSyscall dst next sno args)
+    | type_trap:
+      forall (env: type_env),
+        well_typed_inst env LLTrap
     .
 
   Definition well_typed_insts (env: type_env) (insts: inst_map) :=

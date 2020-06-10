@@ -14,6 +14,7 @@ Require Import LLIR.LLIR.
 
 Definition rewrite_inst_uses (i: inst) (f: reg -> reg): inst :=
   match i with
+  | LLTrap => i
   | LLArg _ _ _ => i
   | LLInt8 _ _ _ => i
   | LLInt16 _ _ _ => i
@@ -21,37 +22,50 @@ Definition rewrite_inst_uses (i: inst) (f: reg -> reg): inst :=
   | LLInt64 _ _ _ => i
   | LLJmp _ => i
   | LLUndef _ _ => i
-  | LLFrame _ _ _ => i
-  | LLGlobal _ _ _ => i
+  | LLFrame _ _ _ _ => i
+  | LLGlobal _ _ _ _ => i
+  | LLMov dst next src =>
+    LLMov dst next (f src)
   | LLLd dst next addr =>
     LLLd dst next (f addr)
   | LLSt next addr val =>
     LLSt next (f addr) (f val)
+  | LLSyscall dst next sno args =>
+    LLSyscall dst next (f sno) (List.map f args)
+  | LLCall dst next callee args =>
+    LLCall dst next (f callee) (List.map f args)
   | LLInvoke dst next callee args exn =>
     LLInvoke dst next (f callee) (List.map f args) exn
+  | LLTCall callee args =>
+    LLTCall (f callee) (List.map f args)
+  | LLTInvoke callee args exn =>
+    LLTInvoke (f callee) (List.map f args) exn
   | LLRet value =>
     LLRet (option_map f value)
   | LLJcc cond bt bf =>
     LLJcc (f cond) bt bf
-  | LLUnop (ty, dst) next op arg =>
-    LLUnop (ty, dst) next op (f arg)
-  | LLBinop (ty, dst) next op lhs rhs =>
-    LLBinop (ty, dst) next op (f lhs) (f rhs)
+  | LLUnop dst next op arg =>
+    LLUnop dst next op (f arg)
+  | LLBinop dst next op lhs rhs =>
+    LLBinop dst next op (f lhs) (f rhs)
+  | LLSelect dst next cond vt vf =>
+    LLSelect dst next (f cond) (f vt) (f vf)
   end.
 
 Theorem inst_use_rewritten:
   forall (i: inst) (r: reg) (f: reg -> reg),
     InstUses i r -> InstUses (rewrite_inst_uses i f) (f r).
 Proof.
-  destruct i; intros src f Huse; 
-    simpl; 
-    try unfold InstUses in *; try destruct dst; try destruct Huse;
-    subst; auto.
-  - right. apply in_map_iff. exists src. auto.
-  - right. apply in_map_iff. exists src. auto.
-  - destruct value; simpl.
-    + subst. reflexivity.
-    + inversion Huse.
+  destruct i; intros r f Huse;
+    simpl;
+    try unfold InstUses in *; 
+    try destruct dst; try destruct value;
+    repeat destruct Huse as [Huse|Huse];
+    subst; simpl; auto;
+    try match goal with
+    | [ H: In ?r ?args |- _ ] => 
+      right; apply in_map_iff; exists r; auto
+    end.
 Qed.
 
 Definition rewrite_phi_uses (p: phi) (f: reg -> reg): phi :=

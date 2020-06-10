@@ -26,18 +26,20 @@ PROOFS=\
 	Typing.vo\
 	SSA.vo\
 	ReachingStores.vo\
-	StoreToLoad.vo\
-	test/fibonacci.vo
-
-# LLIR examples.
-test/%.v: test/%.llbc
-	llir-opt $^ -o $@ -O2
-test/%.llbc: test/%.c
-	llir-clang -c $^ -o $@ -O3
+	StoreToLoad.vo
 
 # Toplevel.
 all:
 	$(MAKE) all-v
+
+# LLIR examples.
+test/%.v: test/%.llbc
+	llir-opt $^ -o $@ -O1
+
+test/simple.llbc: test/simple.c
+	llir-clang $^ -o $@ -O1 -static -Wl,-e=_start_c
+test/%.llbc: test/%.c
+	llir-clang -c $^ -o $@ -O1
 
 # Coq build.
 all-v:
@@ -60,7 +62,8 @@ clean:
 	rm -f .depend.v
 	rm -f *.vo *.vok *.vos *.glob .*.aux .merlin
 	rm -f test/*.vo test/*.vok test/*.vos test/*.glob
-	rm -f test/fibonacci.v
+	rm -f test/*.llbc
+	rm -f test/*.v
 
 
 -include .depend.v

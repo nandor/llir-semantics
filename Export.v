@@ -111,6 +111,7 @@ Ltac defs_are_unique_proof defined_at_inversion :=
   intros def def' r Hdef Hdef';
   apply defined_at_inversion in Hdef;
   apply defined_at_inversion in Hdef';
+  try contradiction;
   repeat destruct Hdef as [Hdef|Hdef];
   repeat destruct Hdef' as [Hdef'|Hdef'];
   destruct Hdef as [Hd Hn];
@@ -129,7 +130,8 @@ Ltac used_at_inversion_proof fn fn_inst_inversion fn_phi_inversion :=
       ]);
       repeat match goal with
       | [ H: False |- _ ] => inversion H
-      | [ H: ?a = r \/ ?b = r |- _ ] => destruct H
+      | [ H: _ = r \/ _ |- _ ] => destruct H
+      | [ H: In _ _ |- _ ] => destruct H
       end;
       try subst r;
       repeat match goal with
@@ -312,10 +314,14 @@ Definition dominator_solution_correct fn doms :=
                   /\
                   In n' doms_pred.
 
-Ltac dominator_solution_proof fn solution func_bb_headers func_bb_succ_inversion :=
+Ltac dominator_solution_proof
+    fn
+    solution
+    func_bb_headers_inversion
+    func_bb_succ_inversion :=
   split; [ compute; reflexivity | ];
   intros n Hbb;
-  apply func_bb_headers in Hbb;
+  apply func_bb_headers_inversion in Hbb;
   repeat destruct Hbb as [Hbb|Hbb];
     remember (solution ! n) as some_doms_n eqn:Edoms_n;
     compute in Edoms_n; subst n;
@@ -329,6 +335,7 @@ Ltac dominator_solution_proof fn solution func_bb_headers func_bb_succ_inversion
     intros pred Hpred;
     apply func_bb_succ_inversion in Hpred;
     repeat destruct Hpred as [Hpred|Hpred];
+    try contradiction;
     destruct Hpred as [Hl Hr];
     try inversion Hr;
     remember (solution ! pred) as some_doms_pred eqn:Edoms_pred;
@@ -439,36 +446,34 @@ Ltac uses_have_defs_proof
     func_dominator_solution_correct :=
   intros n r Hused_at;
   apply func_used_at_inversion in Hused_at;
+  try contradiction;
   repeat destruct Hused_at as [Hused_at|Hused_at];
   destruct Hused_at as [Hn Hr]; subst n;
   remember func_defined_at as H eqn:Eh; clear Eh;
   repeat match goal with
   | [ H: DefinedAt _ ?n ?v /\ _ |- exists _, _ ] =>
-    destruct H as [H' H]
+    destruct H
   | [ Hr: ?v = r, H': DefinedAt _ ?n ?v |- _ ] =>
-    exists n; subst r; split; [apply H'|clear H']; try clear H
-  | [ H: DefinedAt _ _ _ |- exists _, _ ] => clear H
+    exists n; subst r; split; [apply H'|clear H']
+  end;
+  repeat match goal with
+  | [ H: DefinedAt _ _ _ |- _ ] => clear H
   end;
   remember func_bb as H eqn:Eh; clear Eh;
   repeat match goal with
-  | [ H: BasicBlock _ ?header ?node /\ _ |- Dominates _ ?node _ ] =>
-    destruct H as [Hfrom H]
-  | [ H: BasicBlock _ ?header ?node |- Dominates _ ?node _ ] =>
-    destruct H as [Hfrom H]
-
-  | [ H: BasicBlock _ ?header ?node /\ _ |- Dominates _ _ ?node ] =>
-    destruct H as [Hto H]
-  | [ H: BasicBlock _ ?header ?node |- Dominates _ _ ?node ] =>
-    destruct H as [Hto H]
-
-  | [ H: BasicBlock _ _ _ /\ _ |- Dominates _ _ ?node ] =>
-    destruct H as [_ H]
+  | [ H: BasicBlock _ _ _ /\ _ |- Dominates _ _ _ ] =>
+    destruct H
   end;
-  try clear H; match goal with
-  | [ Hfrom: BasicBlock _ ?header ?from, Hto: BasicBlock _ ?header ?to |- _ ] =>
+  match goal with
+  | [ Hfrom: BasicBlock _ ?header ?from
+    , Hto: BasicBlock _ ?header ?to
+    |- Dominates _ ?from ?to
+    ] =>
     clear Hfrom; repeat bb_dom_step func func_bb_headers_inversion Hto
   | [ |- Dominates _ ?n ?n ] =>
     apply dom_self
+  | [ HBlock: BasicBlock _ ?b ?e |- Dominates _ ?b ?e ] =>
+    apply bb_header_dom_nodes; assumption
   | [ Hfrom: BasicBlock _ ?b ?e, Hto: BasicBlock _ ?b' ?e' |- Dominates _ ?e ?e' ] =>
     apply bb_elem_dom with (h := b) (h' := b'); auto;
     [ intros contra; inversion contra
@@ -521,41 +526,69 @@ Ltac bb_proof func func_inst_inversion func_bb_headers :=
   end.
 
 Module X86_Proofs.
-  Ltac well_typed_insts fn insts_inversion :=
+  Ltac type_proof env Henv :=
+    match goal with
+    | |- context [ LLBinop (?t, ?dst) _ ?op ?lhs ?rhs ] =>
+      remember (env ! lhs) as tl eqn:El; rewrite Henv in El;
+      remember (env ! rhs) as tr eqn:Er; rewrite Henv in Er;
+      compute in El; compute in Er;
+      match goal with
+      | [ El: tl = Some ?tl', Er: tr = Some ?tr' |- _ ] =>
+        apply X86_Typing.type_binop with (tl := tl') (tr := tr');
+        subst; constructor
+      end
+    | |- context [ LLJcc ?cond _ _ ] =>
+      remember (env ! cond) as tc eqn:Econd; rewrite Henv in Econd;
+      compute in Econd;
+      match goal with
+      | [ Econd: tc = Some (TInt ?tc') |- _ ] =>
+        apply X86_Typing.type_jcc with (i := tc')
+      end;
+      subst; constructor
+    | |- context [ LLRet (Some ?v) ] =>
+      remember (env ! v) as tv eqn:Ev; rewrite Henv in Ev;
+      compute in Ev;
+      match goal with
+      | [ El: tv = Some ?tv' |- _ ] =>
+        apply X86_Typing.type_ret with (t := tv')
+      end;
+      subst; constructor
+    | |- context [ LLSt _ ?a ?v ] =>
+      remember (env ! v) as tv eqn:Ev; rewrite Henv in Ev;
+      compute in Ev;
+      match goal with
+      | [ Ev: tv = Some ?tv' |- _ ] =>
+        apply X86_Typing.type_st with (t := tv')
+      end;
+      subst; constructor
+    | |- context [ LLUnop (?t, ?dst) _ ?op ?arg ] =>
+      remember (env ! arg) as ta eqn:Ea; rewrite Henv in Ea;
+      compute in Ea;
+      match goal with
+      | [ El: ta = Some ?ta' |- _ ] =>
+        apply X86_Typing.type_unop with (argt := ta')
+      end;
+      subst; constructor
+    | |- context [ LLSyscall ?dst _ ?sno _ ] =>
+      remember (env ! dst) as td eqn:Ed; rewrite Henv in Ed;
+      remember (env ! sno) as ts eqn:Es; rewrite Henv in Es;
+      compute in Es; compute in Ed;
+      match goal with
+      | [ El: ts = Some (TInt ?ts'), Ed: td = Some ?td' |- _ ] =>
+        apply X86_Typing.type_syscall with (t := td') (tsno := ts')
+      end;
+      subst; constructor
+    end.
+
+  Ltac well_typed_insts fn inst_inversion :=
     intros n i Hin;
-    apply insts_inversion in Hin;
+    apply inst_inversion in Hin;
     remember (X86_Typing.ty_env fn) as env eqn:Henv;
     repeat (destruct Hin as [[Hn Hi]|Hin];
       [ inversion Hi as [Hi'];
         try (constructor; subst env; constructor)
       |]);
-      try match goal with
-      | |- context [ LLBinop (?t, ?dst) _ ?op ?lhs ?rhs ] =>
-        remember (env ! lhs) as tl eqn:El; rewrite Henv in El;
-        remember (env ! rhs) as tr eqn:Er; rewrite Henv in Er;
-        compute in El; compute in Er;
-        match goal with
-        | [ El: tl = Some ?tl', Er: tr = Some ?tr' |- _ ] =>
-          apply X86_Typing.type_binop with (tl := tl') (tr := tr');
-          subst; constructor
-        end
-      | |- context [ LLJcc ?cond _ _ ] =>
-        remember (env ! cond) as tc eqn:Econd; rewrite Henv in Econd;
-        compute in Econd;
-        match goal with
-        | [ Econd: tc = Some (TInt ?tc') |- _ ] =>
-          apply X86_Typing.type_jcc with (i := tc')
-        end;
-        subst; constructor
-      | |- context [ LLRet (Some ?v) ] =>
-        remember (env ! v) as tv eqn:Ev; rewrite Henv in Ev;
-        compute in Ev;
-        match goal with
-        | [ El: tv = Some ?tv' |- _ ] =>
-          apply X86_Typing.type_ret with (t := tv')
-        end;
-        subst; constructor
-      end;
+      try type_proof env Henv;
     inversion Hin.
 
   Ltac well_typed_phis fn phi_inversion :=
@@ -573,9 +606,9 @@ Module X86_Proofs.
       |]);
     inversion Hblocks.
 
-  Ltac well_typed fn insts_inversion phi_inversion :=
+  Ltac well_typed fn inst_inversion phi_inversion :=
     split;
-      [ well_typed_insts fn insts_inversion
+      [ well_typed_insts fn inst_inversion
       | well_typed_phis fn phi_inversion
       ].
 End X86_Proofs.

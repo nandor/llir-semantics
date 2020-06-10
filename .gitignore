@@ -6,3 +6,5 @@
 .depend*
 Runtime.v
 *.llbc
+*.llir
+test/*.v
