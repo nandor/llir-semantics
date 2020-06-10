@@ -33,9 +33,10 @@ all:
 	$(MAKE) all-v
 
 # LLIR examples.
-test/%.v: test/%.llbc
-	llir-opt $^ -o $@ -O1
+test/%.v: test/%.llbc all
+	llir-opt $< -o $@ -O1
 
+.PRECIOUS: test/%.v
 test/simple.llbc: test/simple.c
 	llir-clang $^ -o $@ -O1 -static -Wl,-e=_start_c
 test/%.llbc: test/%.c
