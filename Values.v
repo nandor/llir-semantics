@@ -6,8 +6,13 @@ Require Import Coq.Bool.Bool.
 Require Import Coq.ZArith.ZArith.
 
 
+Notation name := positive.
 
-Definition name := positive.
+Notation node := positive.
+
+Notation reg := positive.
+
+
 
 Inductive bit : Type :=
   | I

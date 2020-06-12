@@ -8,17 +8,34 @@ Require Import Coq.Init.Nat.
 
 Require Import LLIR.State.
 Require Import LLIR.LLIR.
-Require Import LLIR.Values.
 Require Import LLIR.Maps.
 Require Import LLIR.Typing.
+Require Import LLIR.Dom.
 
 Import ListNotations.
 
 
 
-Inductive syscall := .
+Record atom := mkdata
+  { dt_size: positive
+  ; dt_data: PTrie.t qword
+  }.
 
-Definition syscall_handler: Type := state -> syscall -> (state * qword).
+Record frame := mkframe
+  { fr_data: PTrie.t atom
+  ; fr_regs: PTrie.t value
+  ; fr_args: PTrie.t value
+  ; fr_func: name
+  ; fr_pc: node
+  ; fr_retaddr: node
+  }.
+
+Record state :=
+  { st_stack: list frame
+  }.
+
+
+Definition trace := list (positive * list qword).
 
 Axiom step_binop: binop -> ty -> value -> value -> option value.
 
@@ -96,7 +113,7 @@ Definition step_inst
   | _ => None
   end.
 
-Definition step (p: prog) (st: state) (sys: syscall_handler): option state :=
+Definition step (p: prog) (st: state): option state :=
   match st.(st_stack) with
   | fr :: frs =>
     match p ! (fr.(fr_func)) with
@@ -111,3 +128,13 @@ Definition step (p: prog) (st: state) (sys: syscall_handler): option state :=
     end
   | _ => None
   end.
+
+Theorem evaluate_bb:
+  forall (p: prog) (st: state) (h: node) (n: node)
+    (fr: frame) (frs: list frame) (f: func),
+    well_typed_prog p ->
+    Some f = p ! (fr.(fr_func)) ->
+    f.(fn_insts) ! (fr.(fr_pc)) <> None ->
+    BasicBlock f h n ->
+    False.
+Admitted.

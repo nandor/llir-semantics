@@ -56,16 +56,8 @@ Theorem inst_use_rewritten:
   forall (i: inst) (r: reg) (f: reg -> reg),
     InstUses i r -> InstUses (rewrite_inst_uses i f) (f r).
 Proof.
-  destruct i; intros r f Huse;
-    simpl;
-    try unfold InstUses in *; 
-    try destruct dst; try destruct value;
-    repeat destruct Huse as [Huse|Huse];
-    subst; simpl; auto;
-    try match goal with
-    | [ H: In ?r ?args |- _ ] => 
-      right; apply in_map_iff; exists r; auto
-    end.
+  destruct i; intros r f Huse; simpl; inversion Huse; constructor;
+  apply in_map_iff; exists r; auto.
 Qed.
 
 Definition rewrite_phi_uses (p: phi) (f: reg -> reg): phi :=
@@ -81,12 +73,7 @@ Theorem phi_use_rewritten:
     PhiUses p n r -> PhiUses (rewrite_phi_uses p f) n (f r).
 Proof.
   destruct p; intros n r f Huse; simpl.
-  unfold PhiUses in Huse.
-  apply Exists_exists in Huse.
-  destruct Huse as [[n' r'] [Hin [Hn Hr]]]. subst n' r'.
-  apply Exists_exists.
-  exists (n, f r).
-  split; auto.
+  inversion Huse; constructor.
   apply in_map_iff.
   exists (n, r).
   auto.

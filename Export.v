@@ -9,10 +9,26 @@ Require Import Coq.Program.Equality.
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 Require Import LLIR.Dom.
-Require Import LLIR.State.
+Require Import LLIR.Values.
 Require Import LLIR.Typing.
 
 Import ListNotations.
+
+Ltac succ_of_proof :=
+  match goal with
+  | [ |- SuccOf ?fn ?from ?to ] =>
+    remember ((fn_insts fn) ! from) as some_inst eqn:Esome_inst;
+    compute in Esome_inst;
+    match goal with
+    | [ H: some_inst = Some ?inst' |- _ ] =>
+      remember inst' as inst eqn:Einst;
+      apply succ_of with (i := inst); subst inst;
+      [ auto
+      | intros contra; inversion contra
+      | constructor
+      ]
+    end
+  end.
 
 Ltac inst_inversion_proof fn :=
   intros inst n Heq;
@@ -38,12 +54,11 @@ Ltac phi_inversion_proof fn :=
   end;
   auto.
 
-Ltac defined_at_inversion_proof fn fn_inst_inversion fn_phi_inversion :=
+Ltac defined_at_inversion_proof fn inst_inversion phi_inversion :=
   intros n r Hdef_at;
   inversion Hdef_at as [n' r' i INST DEFS|n' r' phi PHIS DEFS];
   [
-    unfold InstDefs in *;
-    apply fn_inst_inversion in INST;
+    apply inst_inversion in INST;
     repeat (destruct INST as [Hdef|INST];
       [
         destruct Hdef as [Hn Hsome_inst];
@@ -59,24 +74,24 @@ Ltac defined_at_inversion_proof fn fn_inst_inversion fn_phi_inversion :=
       |]);
     inversion INST
   |
-    unfold PhiDefs in *;
-    apply fn_phi_inversion in PHIS;
+    apply phi_inversion in PHIS;
     repeat (destruct PHIS as [Hdef|PHIS];
       [
         destruct Hdef as [Hn Hsome_inst];
-        inversion Hsome_inst as [Hinst];
+        inversion Hsome_inst as [Hinst]; clear Hsome_inst;
         rewrite <- Hinst in DEFS;
         apply Exists_exists in DEFS;
         destruct DEFS as [phi' [Hin Hdst]];
+        inversion Hdst; subst;
         repeat (destruct Hin as [Hphi|Hin];
-          [ rewrite <- Hphi in Hdst; subst n r;
+          [
+            inversion Hphi; subst;
             repeat match goal with
             | [ |- (?n = ?n /\ ?r = ?r) \/ _ ] => left; split; reflexivity
             | [ |- ?n = ?n /\ ?r = ?r ] => split; reflexivity
             | [ |- _ ] => right
             end
-          |
-          ]);
+          |]);
         inversion Hin
       |]);
     inversion PHIS
@@ -91,7 +106,7 @@ Ltac defined_at_proof :=
       inversion Esome_inst as [Einst];
       clear Esome_inst;
       apply defined_at_inst with (i := inst); rewrite Einst; auto;
-      unfold InstDefs; auto
+      constructor
     | [ |- DefinedAt ?fn ?n _ ] =>
       remember ((fn_phis fn) ! n) as some_phis eqn:Esome_phis;
       compute in Esome_phis;
@@ -104,7 +119,7 @@ Ltac defined_at_proof :=
       | [ HPhi: context [ LLPhi (?ty, ?reg) ?ins ] |- context [ PhiDefs _ ?reg] ] =>
         exists (LLPhi (ty, reg) ins)
       end;
-      split; [unfold In|unfold PhiDefs]; intuition
+      split; [unfold In; intuition|constructor]
     end.
 
 Ltac defs_are_unique_proof defined_at_inversion :=
@@ -118,22 +133,20 @@ Ltac defs_are_unique_proof defined_at_inversion :=
   destruct Hdef' as [Hd' Hn'];
   subst r def def'; auto; try inversion Hn'.
 
-Ltac used_at_inversion_proof fn fn_inst_inversion fn_phi_inversion :=
+Ltac used_at_inversion_proof fn inst_inversion phi_inversion :=
   intros n r Hused_at;
   inversion Hused_at as [n' r' i INST USES|n' r' block phis PHIS USES];
   [
-    clear Hused_at; unfold InstUses in *;
-    apply fn_inst_inversion in INST;
+    clear Hused_at;
+    apply inst_inversion in INST;
     repeat (destruct INST as [[Hn Hinst]|INST];
-      [ inversion Hinst; clear Hinst; subst i n n' r'
+      [ inversion Hinst; clear Hinst; subst i n n' r'; inversion USES
       |
       ]);
       repeat match goal with
-      | [ H: False |- _ ] => inversion H
       | [ H: _ = r \/ _ |- _ ] => destruct H
       | [ H: In _ _ |- _ ] => destruct H
       end;
-      try subst r;
       repeat match goal with
       | [ |- (?n = ?n /\ ?r = ?r) \/ _ ] => left; split; reflexivity
       | [ |- ?n = ?n /\ ?r = ?r ] => split; reflexivity
@@ -141,19 +154,18 @@ Ltac used_at_inversion_proof fn fn_inst_inversion fn_phi_inversion :=
       end;
     inversion INST
   |
-    clear Hused_at; unfold PhiBlockUses in *;
-    apply fn_phi_inversion in PHIS;
+    clear Hused_at; subst n' r';
+    apply phi_inversion in PHIS;
     repeat (destruct PHIS as [[Hb Hphis]|PHIS];
       [ inversion Hphis; subst phis; clear Hphis;
         apply Exists_exists in USES;
         destruct USES as [x [Hin Huses]];
         repeat (destruct Hin as [Hphi|Hin];
-          [ subst x; unfold PhiUses in Huses;
-            apply Exists_exists in Huses;
-            destruct Huses as [[n'' r''] [Hphi_in [Hn Hr]]];
+          [ subst x;
+            inversion Huses as [dst ins n'' r'' Hphi_in Hdst Hn Hr];
             subst n'' r'';
             repeat (destruct Hphi_in as [Hbr|Hphi_in];
-              [ inversion Hbr; subst n' r'
+              [ inversion Hbr; subst n r
               | simpl in Hphi_in
               ])
           | simpl in Hin
@@ -168,130 +180,117 @@ Ltac used_at_inversion_proof fn fn_inst_inversion fn_phi_inversion :=
     inversion PHIS
   ].
 
-Ltac reach_pred_step fn pred :=
-  apply reach_succ with (a := pred);
-  [
-    unfold SuccOf;
-    simpl;
-    auto
-  |
-  ].
-
-Ltac block_elem_proof fn fn_inv p proof_prev :=
-  apply bb_elem with (prev := p);
-  [ intro contra; inversion contra
-  | intro contra; inversion contra
-  | apply proof_prev
-  | compute; reflexivity
-  | compute; intro contra; inversion contra
-  | auto
-  | intros prev' Hsucc;
-    unfold SuccOf in Hsucc; unfold Succeeds in Hsucc;
-    remember ((fn_insts fn) ! prev') as inst eqn:Hinst;
-    symmetry in Hinst;
-    apply fn_inv in Hinst;
-    repeat destruct Hinst as [[Hl Hr]|Hinst]; subst inst; auto; try inversion Hsucc; try inversion H
-  ].
-
-Ltac block_header_proof fn fn_inv bb_reach :=
-  apply block_header;
-  [ apply bb_reach
-  | intros term Hsucc;
-    unfold SuccOf in Hsucc; unfold Succeeds in Hsucc; unfold TermAt;
-    remember ((fn_insts fn) ! term) as inst eqn:H;
-    symmetry in H;
-    apply fn_inv in H;
-    repeat destruct H as [[Hl Hr]|H];
-      subst inst; try subst term; simpl; auto;
-      inversion Hsucc; inversion H
-  | intros contra; inversion contra
-  ].
-
-Ltac bb_headers_inversion_proof fn func_inversion :=
+Ltac bb_headers_inversion_proof fn inst_inversion :=
   intros header Hbb;
   inversion Hbb as [header'' REACH TERM NODE];
   remember ((fn_insts fn) ! header) as inst eqn:Einst;
   remember (get_predecessors fn header) as pred eqn:Epred;
-  apply func_inversion in Einst;
+  apply inst_inversion in Einst;
   repeat (destruct Einst as [[Ehdr Ei]|Einst]; [auto; (
     rewrite <- Ehdr in Epred;
     compute in Epred;
     match goal with
     | [ E: pred = [ ?p ] |- _ ] =>
-      assert (Hsucc: SuccOf fn p header);
-      subst header;
-      compute;
-      auto;
+      remember ((fn_insts fn) ! p) as some_inst' eqn:Esome_inst';
+      compute in Esome_inst';
+      assert (Hsucc: SuccOf fn p header); [
+      match goal with
+      | [ E: some_inst' = Some ?inst' |- _ ] =>
+        apply succ_of with (i := inst'); subst;
+        [ auto
+        | compute; intros contra; inversion contra
+        | constructor]
+      end|];
+      subst header; compute; auto;
       apply TERM in Hsucc;
-      compute in Hsucc;
-      inversion Hsucc
+      inversion Hsucc as [i n INST TERMINATOR];
+      subst; compute in INST; inversion INST; subst i;
+      inversion TERMINATOR
     end)|]);
-  apply NODE in Einst; inversion Einst.
+    contradiction.
 
+Ltac bb_inversion_step bb_headers_inversion :=
+  match goal with
+  | [ BLOCK: BasicBlock _ _ _ |- _ ] =>
+    let HEADER := fresh in
+    let UNIQ := fresh in
+    let NOT_ENTRY := fresh in
+    let NOT_TERM := fresh in
+    let NOT_HEADER := fresh in
+    let NOT_PREV := fresh in
+    let BLOCK' := fresh in
+    let INST := fresh in
+    let NO_PHI := fresh in
+    inversion BLOCK as
+      [ header' HEADER
+      | header' prev' elem' NOT_HEADER NOT_ENTRY NOT_PREV BLOCK' PRED NOT_TERM INST NO_PHI UNIQ
+      ];
+      subst;
+      [ match goal with
+        | [ |- ?n = ?n ] => reflexivity
+        | [ H: BasicBlockHeader _ _ |- _ ] =>
+          apply bb_headers_inversion in H;
+          repeat destruct H as [H|H];
+          inversion H
+        end
+      | apply get_predecessors_correct in PRED;
+        compute in PRED;
+        repeat destruct PRED as [PRED|PRED]; subst;
+        match goal with
+        | [ BLOCK: BasicBlock ?fn ?header ?hdr
+          , BLOCK': BasicBlock ?fn ?header ?term
+          |- ?hdr = ?header
+          ] =>
+            remember ((fn_insts fn) ! term) as some_t eqn:Esome_t;
+            compute in Esome_t;
+            match goal with
+            | [ H: some_t = Some ?inst |- _ ] =>
+              remember inst as t eqn: Et;
+              assert (TermAt fn term);
+              [ apply term_at with (i := t); subst t; auto; constructor|];
+              contradiction
+            end
+        | [ |- _ ] => idtac
+        end;
+        try contradiction;
+        clear UNIQ NOT_ENTRY NOT_TERM NOT_HEADER NOT_PREV BLOCK INST NO_PHI
+      ]
+  end.
 
-Ltac bb_inversion_proof fn func_inversion func_headers :=
+Ltac bb_inversion_proof fn inst_inversion bb_headers_inversion :=
   intros header elem BLOCK;
   destruct ((fn_insts fn) ! elem) eqn:Einst;
   [ symmetry in Einst;
-  apply func_inversion in Einst;
-    repeat (destruct Einst as [[Helem _]|Einst];
-      [ repeat match goal with
-        | [ H: ?e = elem |- ?n = header /\ ?e = elem ] =>
-          split; [|subst; reflexivity]
-        | [ H: ?e = elem |- (?n = header /\ ?e = elem) \/ _ ] =>
-          left
-        | [ H: ?e = elem |- _ ] =>
-          right
-        end;
-        repeat (inversion BLOCK as
-          [ header' HEADER
-          | header' prev' elem' _ _ BLOCK' PRED NOT_TERM _ _ UNIQ
-          ]; subst;
-          [ match goal with
-            | [ |- ?n = ?n ] =>
-              reflexivity
-            | [ |- _ ] =>
-              apply func_headers in HEADER;
-              repeat destruct HEADER as [HEADER|HEADER];
-              inversion HEADER
-            end
-          | apply get_predecessors_correct in PRED;
-            simpl in PRED;
-            repeat (destruct PRED as [PRED|PRED]; [|inversion PRED]);
-            match goal with
-            | [ H: False |- _ ] => inversion H
-            | [ |- _ ] =>
-              rewrite <- PRED in NOT_TERM;
-              compute in NOT_TERM;
-              match goal with
-              | [ H: true = true -> False |- _ ] =>
-                assert(H': true = true); [reflexivity|]; apply H in H'; inversion H'
-              | [ |- _ ] =>
-                clear BLOCK UNIQ NOT_TERM;
-                rename BLOCK' into BLOCK;
-                rename PRED into Helem;
-                rename prev' into elem
-              end
-            end
-          ])
-    |]);
-    inversion Einst
+    apply inst_inversion in Einst;
+    repeat destruct Einst as [[Helem _]|Einst];
+      repeat match goal with
+      | [ H: ?e = elem |- ?n = header /\ ?e = elem ] =>
+        split; subst elem; try reflexivity
+      | [ H: ?e = elem |- (?n = header /\ ?e = elem) \/ _ ] =>
+        left
+      | [ H: ?e = elem |- _ ] =>
+        right
+      | [ H: Some _ = None |- _ ] =>
+        inversion H
+      end;
+      repeat bb_inversion_step bb_headers_inversion
   | inversion BLOCK as
-      [ header' [header'' _ _ INST]
-      | header' prev' elem' _ _ _ PRED NOT_TERM INST _ UNIQ
+      [ header' [header'' REACH TERM INST]
+      | header' prev' elem' NOT_HEADER NOT_ENTRY NOT_PREV BLOCK' PRED NOT_TERM INST
       ]; apply INST in Einst; inversion Einst
   ].
 
-Ltac bb_succ_inversion_proof bb_headers bb_inversion :=
+Ltac bb_succ_inversion_proof bb_headers_inversion bb_inversion :=
   intros from to [from' to' term HDR_FROM HDR_TO SUCC];
-  apply bb_headers in HDR_TO;
+  apply bb_headers_inversion in HDR_TO;
   apply bb_inversion in HDR_FROM;
   repeat destruct HDR_FROM as [HDR_FROM|HDR_FROM];
   repeat destruct HDR_TO as [HDR_TO|HDR_TO];
   destruct HDR_FROM as [Hfrom Htem];
-  subst; compute in SUCC;
-  try destruct SUCC as [SUCC|SUCC];
-  inversion SUCC; auto; repeat (right; auto).
+  inversion SUCC as [n m inst HN HM SUCCEEDS Hn Hm]; subst;
+  compute in HN; inversion HN as [Hinst]; clear HN; subst inst;
+  inversion SUCCEEDS;
+  auto; repeat (right; auto).
 
 Definition dominator_solution_correct fn doms :=
   Some [fn.(fn_entry)] = doms ! (fn.(fn_entry))
@@ -317,11 +316,11 @@ Definition dominator_solution_correct fn doms :=
 Ltac dominator_solution_proof
     fn
     solution
-    func_bb_headers_inversion
+    bb_headers_inversion
     func_bb_succ_inversion :=
   split; [ compute; reflexivity | ];
   intros n Hbb;
-  apply func_bb_headers_inversion in Hbb;
+  apply bb_headers_inversion in Hbb;
   repeat destruct Hbb as [Hbb|Hbb];
     remember (solution ! n) as some_doms_n eqn:Edoms_n;
     compute in Edoms_n; subst n;
@@ -405,20 +404,20 @@ Proof.
   }
 Qed.
 
-Ltac bb_dom_step func func_bb_headers Hbb :=
+Ltac bb_dom_step fn bb_headers_inversion Hbb :=
   match goal with
   | [ |- Dominates _ _ ?node ] =>
-    remember (get_predecessors func node) as preds eqn:Epreds; compute in Epreds;
+    remember (get_predecessors fn node) as preds eqn:Epreds; compute in Epreds;
     match goal with
     | [ H: preds = [?n] |- _ ] =>
       remember n as pred eqn:Epred;
       try rewrite Epred in Hbb;
       try rewrite Epred;
       clear Epreds preds;
-      assert (Hsucc: SuccOf func pred node); [subst pred; compute; reflexivity|];
+      assert (Hsucc: SuccOf fn pred node); [subst pred; succ_of_proof|];
       apply bb_elem_pred in Hbb;
       destruct Hbb as [H|H];
-        [ apply func_bb_headers in H;
+        [ apply bb_headers_inversion in H;
           repeat destruct H as [H|H];
           inversion H
         | generalize (H pred Hsucc); intros Hinv;
@@ -437,19 +436,19 @@ Ltac bb_dom_step func func_bb_headers Hbb :=
   end.
 
 Ltac uses_have_defs_proof
-    func
-    func_used_at_inversion
-    func_defined_at
-    func_bb
-    func_bb_headers_inversion
-    func_dominator_solution
-    func_dominator_solution_correct :=
+    fn
+    used_at_inversion
+    defined_at
+    bb
+    bb_headers_inversion
+    dominator_solution
+    dominator_solution_correct :=
   intros n r Hused_at;
-  apply func_used_at_inversion in Hused_at;
+  apply used_at_inversion in Hused_at;
   try contradiction;
   repeat destruct Hused_at as [Hused_at|Hused_at];
   destruct Hused_at as [Hn Hr]; subst n;
-  remember func_defined_at as H eqn:Eh; clear Eh;
+  remember defined_at as H eqn:Eh; clear Eh;
   repeat match goal with
   | [ H: DefinedAt _ ?n ?v /\ _ |- exists _, _ ] =>
     destruct H
@@ -459,7 +458,7 @@ Ltac uses_have_defs_proof
   repeat match goal with
   | [ H: DefinedAt _ _ _ |- _ ] => clear H
   end;
-  remember func_bb as H eqn:Eh; clear Eh;
+  remember bb as H eqn:Eh; clear Eh;
   repeat match goal with
   | [ H: BasicBlock _ _ _ /\ _ |- Dominates _ _ _ ] =>
     destruct H
@@ -469,7 +468,7 @@ Ltac uses_have_defs_proof
     , Hto: BasicBlock _ ?header ?to
     |- Dominates _ ?from ?to
     ] =>
-    clear Hfrom; repeat bb_dom_step func func_bb_headers_inversion Hto
+    clear Hfrom; repeat bb_dom_step fn bb_headers_inversion Hto
   | [ |- Dominates _ ?n ?n ] =>
     apply dom_self
   | [ HBlock: BasicBlock _ ?b ?e |- Dominates _ ?b ?e ] =>
@@ -477,11 +476,11 @@ Ltac uses_have_defs_proof
   | [ Hfrom: BasicBlock _ ?b ?e, Hto: BasicBlock _ ?b' ?e' |- Dominates _ ?e ?e' ] =>
     apply bb_elem_dom with (h := b) (h' := b'); auto;
     [ intros contra; inversion contra
-    | generalize (correct_implies_dom func func_dominator_solution func_dominator_solution_correct);
+    | generalize (correct_implies_dom fn dominator_solution dominator_solution_correct);
       intros Hdoms;
       apply bb_has_header in Hfrom;
       apply bb_has_header in Hto;
-      remember (func_dominator_solution ! b') as some_doms_n eqn:Esome_doms_n;
+      remember (dominator_solution ! b') as some_doms_n eqn:Esome_doms_n;
       compute in Esome_doms_n;
       destruct some_doms_n as [doms_n|]; inversion Esome_doms_n;
       generalize (Hdoms b' b doms_n Hto Hfrom Esome_doms_n); intros Hds;
@@ -489,126 +488,139 @@ Ltac uses_have_defs_proof
     ]
   end.
 
-Ltac bb_proof func func_inst_inversion func_bb_headers :=
-  repeat split;
-  repeat match goal with
-  | [ |- BasicBlock _ ?h ?h ] => apply bb_header; apply func_bb_headers
-  | [ |- BasicBlock _ ?h ?e ] =>
-    remember (get_predecessors func e) as preds eqn:Epreds; compute in Epreds;
-    match goal with
-    | [ H: preds = [?n] |- _ ] =>
-      remember n as pred eqn:Hpred; try rewrite Hpred; clear Epreds preds;
-      apply bb_elem with (prev := pred); subst pred;
-      simpl;
-      match goal with
-      | [ |- forall _, _ ] =>
-        intros pred' Hsucc; unfold SuccOf in Hsucc;
-        remember ((fn_insts func) ! pred') as inst eqn:Einst;
-        apply func_inst_inversion in Einst;
-        repeat (destruct Einst as [[Eprev Ei]|Einst];
-          [ subst inst pred'; compute in Hsucc;
-            repeat destruct Hsucc as [Hsucc|Hsucc];
-            try reflexivity; try inversion Hsucc
-          |]);
-          subst inst; inversion Hsucc
-      | [ |- ?a <> ?b ] =>
-        intros contra; inversion contra
-      | [ |- ~ TermAt _ _ ] =>
-        compute; intros contra; inversion contra
-      | [ |- SuccOf _ _ _ ] =>
-        compute; reflexivity
-      | [ |- None = None ] =>
-        reflexivity
-      | [ |- _ ] =>
-        idtac
+Ltac bb_proof_step node inst_inversion :=
+  remember node as pred eqn:Hpred; try rewrite Hpred;
+  apply bb_elem with (prev := pred); subst pred; simpl;
+    [ intros contra; inversion contra
+    | intros contra; inversion contra
+    | intros contra; inversion contra
+    |
+    | match goal with
+      | [ |- SuccOf ?fn ?from _ ] =>
+        remember ((fn_insts fn) ! from) as some_inst eqn:Esome_inst;
+        compute in Esome_inst;
+        match goal with
+        | [ H: some_inst = Some ?inst' |- _ ] =>
+          remember inst' as inst eqn:Einst;
+          apply succ_of with (i := inst); subst;
+          [ auto
+          | intros contra; inversion contra
+          | constructor
+          ]
+        end
       end
+    | intros contra;
+      inversion contra as [i n INST TERM];
+      compute in INST; inversion INST; subst i;
+      inversion TERM
+    | intros contra; inversion contra
+    | reflexivity
+    | intros pred' Hsucc;
+      inversion Hsucc as [n m i HN HM SUCC Hn Hm]; subst;
+      apply inst_inversion in HN;
+      repeat (destruct HN as [[Eprev Ei]|HN];
+        [ let H := fresh in
+          subst pred'; try reflexivity; inversion Ei as [H]; subst i;
+          inversion SUCC
+        |]);
+      inversion HN
+    ].
+
+Ltac bb_proof fn inst_inversion bb_headers :=
+ repeat split; repeat
+    match goal with
+    | [ |- BasicBlock _ ?h ?h ] => apply bb_header; apply bb_headers
+    | [ |- BasicBlock ?fn ?h ?e ] =>
+      remember (get_predecessors fn e) as preds eqn:Epreds; compute in Epreds;
+      match goal with
+      | [ H: preds = [?n] |- _ ] =>
+        clear H preds;
+        bb_proof_step n inst_inversion
+      end
+   end.
+
+Ltac type_proof env Henv :=
+  match goal with
+  | |- context [ LLBinop (?t, ?dst) _ ?op ?lhs ?rhs ] =>
+    remember (env ! lhs) as tl eqn:El; rewrite Henv in El;
+    remember (env ! rhs) as tr eqn:Er; rewrite Henv in Er;
+    compute in El; compute in Er;
+    match goal with
+    | [ El: tl = Some ?tl', Er: tr = Some ?tr' |- _ ] =>
+      apply type_binop with (tl := tl') (tr := tr');
+      subst; constructor
     end
+  | |- context [ LLJcc ?cond _ _ ] =>
+    remember (env ! cond) as tc eqn:Econd; rewrite Henv in Econd;
+    compute in Econd;
+    match goal with
+    | [ Econd: tc = Some (TInt ?tc') |- _ ] =>
+      apply type_jcc with (i := tc')
+    end;
+    subst; constructor
+  | |- context [ LLRet (Some ?v) ] =>
+    remember (env ! v) as tv eqn:Ev; rewrite Henv in Ev;
+    compute in Ev;
+    match goal with
+    | [ El: tv = Some ?tv' |- _ ] =>
+      apply type_ret with (t := tv')
+    end;
+    subst; constructor
+  | |- context [ LLSt _ ?a ?v ] =>
+    remember (env ! v) as tv eqn:Ev; rewrite Henv in Ev;
+    compute in Ev;
+    match goal with
+    | [ Ev: tv = Some ?tv' |- _ ] =>
+      apply type_st with (t := tv')
+    end;
+    subst; constructor
+  | |- context [ LLUnop (?t, ?dst) _ ?op ?arg ] =>
+    remember (env ! arg) as ta eqn:Ea; rewrite Henv in Ea;
+    compute in Ea;
+    match goal with
+    | [ El: ta = Some ?ta' |- _ ] =>
+      apply type_unop with (argt := ta')
+    end;
+    subst; constructor
+  | |- context [ LLSyscall ?dst _ ?sno _ ] =>
+    remember (env ! dst) as td eqn:Ed; rewrite Henv in Ed;
+    remember (env ! sno) as ts eqn:Es; rewrite Henv in Es;
+    compute in Es; compute in Ed;
+    match goal with
+    | [ El: ts = Some (TInt ?ts'), Ed: td = Some ?td' |- _ ] =>
+      apply type_syscall with (t := td') (tsno := ts')
+    end;
+    subst; constructor
   end.
 
-Module X86_Proofs.
-  Ltac type_proof env Henv :=
-    match goal with
-    | |- context [ LLBinop (?t, ?dst) _ ?op ?lhs ?rhs ] =>
-      remember (env ! lhs) as tl eqn:El; rewrite Henv in El;
-      remember (env ! rhs) as tr eqn:Er; rewrite Henv in Er;
-      compute in El; compute in Er;
-      match goal with
-      | [ El: tl = Some ?tl', Er: tr = Some ?tr' |- _ ] =>
-        apply X86_Typing.type_binop with (tl := tl') (tr := tr');
-        subst; constructor
-      end
-    | |- context [ LLJcc ?cond _ _ ] =>
-      remember (env ! cond) as tc eqn:Econd; rewrite Henv in Econd;
-      compute in Econd;
-      match goal with
-      | [ Econd: tc = Some (TInt ?tc') |- _ ] =>
-        apply X86_Typing.type_jcc with (i := tc')
-      end;
-      subst; constructor
-    | |- context [ LLRet (Some ?v) ] =>
-      remember (env ! v) as tv eqn:Ev; rewrite Henv in Ev;
-      compute in Ev;
-      match goal with
-      | [ El: tv = Some ?tv' |- _ ] =>
-        apply X86_Typing.type_ret with (t := tv')
-      end;
-      subst; constructor
-    | |- context [ LLSt _ ?a ?v ] =>
-      remember (env ! v) as tv eqn:Ev; rewrite Henv in Ev;
-      compute in Ev;
-      match goal with
-      | [ Ev: tv = Some ?tv' |- _ ] =>
-        apply X86_Typing.type_st with (t := tv')
-      end;
-      subst; constructor
-    | |- context [ LLUnop (?t, ?dst) _ ?op ?arg ] =>
-      remember (env ! arg) as ta eqn:Ea; rewrite Henv in Ea;
-      compute in Ea;
-      match goal with
-      | [ El: ta = Some ?ta' |- _ ] =>
-        apply X86_Typing.type_unop with (argt := ta')
-      end;
-      subst; constructor
-    | |- context [ LLSyscall ?dst _ ?sno _ ] =>
-      remember (env ! dst) as td eqn:Ed; rewrite Henv in Ed;
-      remember (env ! sno) as ts eqn:Es; rewrite Henv in Es;
-      compute in Es; compute in Ed;
-      match goal with
-      | [ El: ts = Some (TInt ?ts'), Ed: td = Some ?td' |- _ ] =>
-        apply X86_Typing.type_syscall with (t := td') (tsno := ts')
-      end;
-      subst; constructor
-    end.
+Ltac well_typed_insts fn inst_inversion :=
+  intros n i Hin;
+  apply inst_inversion in Hin;
+  remember (ty_env fn) as env eqn:Henv;
+  repeat (destruct Hin as [[Hn Hi]|Hin];
+    [ inversion Hi as [Hi'];
+      try (constructor; subst env; constructor)
+    |]);
+    try type_proof env Henv;
+  inversion Hin.
 
-  Ltac well_typed_insts fn inst_inversion :=
-    intros n i Hin;
-    apply inst_inversion in Hin;
-    remember (X86_Typing.ty_env fn) as env eqn:Henv;
-    repeat (destruct Hin as [[Hn Hi]|Hin];
-      [ inversion Hi as [Hi'];
-        try (constructor; subst env; constructor)
-      |]);
-      try type_proof env Henv;
-    inversion Hin.
+Ltac well_typed_phis fn phi_inversion :=
+  intros n i phi Hblocks Hin;
+  remember (ty_env fn) as env eqn:Henv;
+  apply phi_inversion in Hblocks;
+  repeat (destruct Hblocks as [[Hn Hphis]|Hblocks];
+    [ inversion Hphis as [Hphis']; subst i; clear Hphis;
+      repeat (destruct Hin as [Hphi|Hin];
+        [ subst phi; constructor;
+          intros n' r H;
+          repeat destruct H as [H|H]; inversion H; subst; constructor
+        |]);
+      inversion Hin
+    |]);
+  inversion Hblocks.
 
-  Ltac well_typed_phis fn phi_inversion :=
-    intros n i phi Hblocks Hin;
-    remember (X86_Typing.ty_env fn) as env eqn:Henv;
-    apply phi_inversion in Hblocks;
-    repeat (destruct Hblocks as [[Hn Hphis]|Hblocks];
-      [ inversion Hphis as [Hphis']; subst i; clear Hphis;
-        repeat (destruct Hin as [Hphi|Hin];
-          [ subst phi; constructor;
-            intros n' r H;
-            repeat destruct H as [H|H]; inversion H; subst; constructor
-          |]);
-        inversion Hin
-      |]);
-    inversion Hblocks.
-
-  Ltac well_typed fn inst_inversion phi_inversion :=
-    split;
-      [ well_typed_insts fn inst_inversion
-      | well_typed_phis fn phi_inversion
-      ].
-End X86_Proofs.
+Ltac well_typed_func_proof fn inst_inversion phi_inversion :=
+  split;
+    [ well_typed_insts fn inst_inversion
+    | well_typed_phis fn phi_inversion
+    ].

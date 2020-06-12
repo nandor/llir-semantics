@@ -4,8 +4,9 @@
 
 Require Import Coq.ZArith.ZArith.
 Require Import Coq.Lists.List.
+Require Import FunInd.
 
-Require Import LLIR.State.
+Require Import LLIR.Values.
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 
@@ -365,6 +366,7 @@ Section FUNCTION.
       forall (header: node) (prev: node) (elem: node)
         (NOT_HEADER: header <> elem)
         (NOT_ENTRY: entry <> elem)
+        (NOT_PREV: prev <> elem)
         (BLOCK: BasicBlock header prev)
         (PRED: SuccOf f prev elem)
         (NOT_TERM: ~TermAt f prev)
@@ -525,6 +527,160 @@ Section FUNCTION.
       BasicBlockDominates h h' ->
       Dominates e e'.
   Admitted.
+
+  Theorem bb_elem_not_header:
+    forall (h: node) (e: node),
+      BasicBlock h e ->
+      BasicBlockHeader e ->
+      h = e.
+  Proof.
+    intros h e Hbb Hheader.
+    inversion Hbb; auto.
+    subst header elem.
+    inversion Hheader.
+    apply TERM in PRED.
+    contradiction.
+  Qed.
+
+
+  Inductive PathToElem: node -> list node -> node -> Prop :=
+    | path_elem_header:
+      forall (n: node)
+        (HEADER: BasicBlockHeader n),
+        PathToElem n [n] n
+    | path_elem_cons:
+      forall (header: node) (prev: node) (elem: node) (p: list node)
+        (BLOCK: BasicBlock header elem)
+        (TL: SuccOf f prev elem)
+        (HD: PathToElem header p prev)
+        (NH: header <> elem)
+        (NE: prev <> elem),
+        PathToElem header (elem :: p) elem
+    .
+
+  Theorem bb_path_to_elem:
+    forall (h: node) (e: node),
+      BasicBlock h e -> 
+        exists (p: list node), PathToElem h p e.
+  Proof.
+    intros h e Hbb.
+    induction Hbb.
+    {
+      exists [header].
+      apply path_elem_header.
+      auto.
+    }
+    {
+      destruct IHHbb as [p Hpath].
+      exists (elem :: p).
+      apply path_elem_cons with (prev := prev); auto.
+      apply bb_elem with (prev := prev); auto.
+    }
+  Qed.
+
+  Theorem bb_path_bb:
+    forall (h: node) (e: node) (p: list node),
+      PathToElem h p e -> BasicBlock h e.
+  Proof.
+    intros h e p Hpath.
+    inversion Hpath.
+    + constructor; auto.
+    + inversion BLOCK.
+      - constructor. auto.
+      - apply UNIQ in TL.
+        subst prev0 header0 elem0.
+        apply bb_elem with (prev := prev); auto.
+  Qed.
+
+  Theorem bb_path_no_loop:
+    forall (h: node) (p: list node),
+      PathToElem h p h -> p = [h].
+  Proof.
+    intros h p Hpath.
+    inversion Hpath; auto.
+    subst. contradiction.
+  Qed.
+
+  Theorem bb_path_no_term:
+    forall (h: node) (e: node) (p: list node),
+      PathToElem h p e ->
+        forall (n: node),
+          In n p -> n = e \/ ~TermAt f n.
+  Proof.
+    intros h e p Hpath.
+    induction Hpath; intros n' Hin.
+    inversion Hin; auto.
+    destruct Hin; auto.
+    right.
+    generalize (IHHpath n' H). intros Hind. clear IHHpath.
+    destruct Hind; auto.
+    inversion BLOCK.
+    - subst. contradiction.
+    - apply UNIQ in TL; subst; auto.
+  Qed.
+
+  Theorem bb_path_uniq:
+    forall (h: node) (e: node) (p: list node) (p': list node),
+      PathToElem h p e ->
+      PathToElem h p' e ->
+      p = p'.
+  Proof.
+    intros h e p p' Hp. generalize dependent p'.
+    induction Hp; intros p' Hp'.
+    symmetry; apply bb_path_no_loop; auto.
+    inversion Hp'; subst; try contradiction.
+    inversion BLOCK0; subst; try contradiction.
+    apply UNIQ in TL0; subst prev1.
+    apply UNIQ in TL; subst prev0.
+    apply IHHp in HD; subst p0.
+    reflexivity.
+  Qed.
+
+  Definition get_bb_pred (e: node): option node :=
+    match get_predecessors f e with
+    | [p] =>
+      match f.(fn_insts) ! p with
+      | Some inst => if is_terminator inst then None else Some p
+      | None => None
+      end
+    | _ => None
+    end.
+  (*
+  Theorem bb_elem_has_predecessor:
+    forall (h: node) (e: node),
+      BasicBlock h e ->
+      h <> e ->
+      exists (p: node), Some p = get_bb_pred e.
+  Proof.
+    intros h e Hbb Hne.
+    inversion Hbb; try contradiction.
+    exists prev.
+    unfold get_bb_pred.
+    remember (get_predecessors f e) as some_pred eqn:Esome_pred.
+    destruct some_pred.
+    {
+      apply get_predecessors_correct in PRED.
+      rewrite <- Esome_pred in PRED.
+      inversion PRED.
+    }
+    {
+      destruct some_pred.
+      {
+        assert (Hk: SuccOf f k e).
+        { 
+          apply get_predecessors_correct. 
+          rewrite <- Esome_pred. 
+          left. 
+          reflexivity. 
+        }
+        unfold SuccOf in 
+      }
+      {
+      
+      }
+    }
+  Qed.
+  *)
 End FUNCTION.
 
 Lemma eq_cfg_dom:

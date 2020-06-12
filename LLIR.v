@@ -7,9 +7,10 @@ Require Import Coq.Lists.List.
 
 Require Import LLIR.Maps.
 Require Import LLIR.State.
-Require Import LLIR.Values.
+Require Export LLIR.Values.
 
 Import ListNotations.
+
 
 
 Record object := mkobject
@@ -109,115 +110,215 @@ Record func : Type := mkfunc
 Definition prog : Type := PTrie.t func.
 
 
-Definition InstDefs (i: inst) (r: reg): Prop :=
-  match i with
-  | LLLd (_, dst) _ _ => dst = r
-  | LLArg (_, dst) _ _ => dst = r
-  | LLInt8 dst _ _ => dst = r
-  | LLInt16 dst _ _ => dst = r
-  | LLInt32 dst _ _ => dst = r
-  | LLInt64 dst _ _ => dst = r
-  | LLMov (_, dst) _ _ => dst = r
-  | LLFrame dst _ _ _ => dst = r
-  | LLGlobal dst _ _ _ => dst = r
-  | LLUndef (_, dst) _ => dst = r
-  | LLUnop (_, dst) _ _ _ => dst = r
-  | LLBinop (_, dst) _ _ _ _ => dst = r
-  | LLSelect (_, dst) _ _ _ _ => dst = r
-  | LLSyscall dst _ _ _ => dst = r
-  | LLCall ret _ _ _ =>
-    match ret with
-    | None => False
-    | Some (_, dst) => dst = r
-    end
-  | LLInvoke ret _ _ _ _ =>
-    match ret with
-    | None => False
-    | Some (_, dst) => dst = r
-    end
-  | LLTCall _ _ => False
-  | LLTInvoke _ _ _ => False
-  | LLSt _ _ _ => False
-  | LLRet _ => False
-  | LLJcc _ _ _ => False
-  | LLJmp _ => False
-  | LLTrap => False
-  end.
+Inductive InstDefs: inst -> reg -> Prop :=
+  | defs_ld:
+    forall (t: ty) (dst: reg) (next: node) (addr: reg),
+      InstDefs (LLLd (t, dst) next addr) dst
+  | defs_arg:
+    forall (t: ty) (dst: reg) (next: node) (index: nat),
+      InstDefs (LLArg (t, dst) next index) dst
+  | defs_int8:
+    forall (dst: reg) (next: node) (value: INT8.t),
+      InstDefs (LLInt8 dst next value) dst
+  | defs_int16:
+    forall (dst: reg) (next: node) (value: INT16.t),
+      InstDefs (LLInt16 dst next value) dst
+  | defs_int32:
+    forall (dst: reg) (next: node) (value: INT32.t),
+      InstDefs (LLInt32 dst next value) dst
+  | defs_int64:
+    forall (dst: reg) (next: node) (value: INT64.t),
+      InstDefs (LLInt64 dst next value) dst
+  | defs_mov:
+    forall (t: ty) (dst: reg) (next: node) (src: reg),
+      InstDefs (LLMov (t, dst) next src) dst
+  | defs_select:
+    forall (t: ty) (dst: reg) (next: node) (cond: reg) (vt: reg) (vf: reg),
+      InstDefs (LLSelect (t, dst) next cond vt vf) dst
+  | defs_frame:
+    forall (dst: reg) (next: node) (object: positive) (offset: nat),
+      InstDefs (LLFrame dst next object offset) dst
+  | defs_global:
+    forall (dst: reg) (next: node) (object: positive) (offset: nat),
+      InstDefs (LLGlobal dst next object offset) dst
+  | defs_undef:
+    forall (t: ty) (dst: reg) (next: node),
+      InstDefs (LLUndef (t, dst) next) dst
+  | defs_unop:
+    forall (t: ty) (dst: reg) (next: node) (op: unop) (arg: reg),
+      InstDefs (LLUnop (t, dst) next op arg) dst
+  | defs_binop:
+    forall (t: ty) (dst: reg) (next: node) (op: binop) (lhs: reg) (rhs: reg),
+      InstDefs (LLBinop (t, dst) next op lhs rhs) dst
+  | defs_syscall:
+    forall (dst: reg) (next: node) (sno: reg) (args: list reg),
+      InstDefs (LLSyscall dst next sno args) dst
+  | defs_call:
+    forall (t: ty) (dst: reg) (next: node) (callee: reg) (args: list reg),
+      InstDefs (LLCall (Some (t, dst)) next callee args) dst
+  | defs_invoke:
+    forall (t: ty) (dst: reg) (next: node) (callee: reg) (args: list reg) (exn: node),
+      InstDefs (LLInvoke (Some (t, dst)) next callee args exn) dst
+  .
 
+Inductive PhiDefs: phi -> reg -> Prop :=
+  | defs_phi:
+    forall (t: ty) (dst: reg) (ins: list (node * reg)),
+      PhiDefs (LLPhi (t, dst) ins) dst
+  .
 
-Definition PhiDefs (i: phi) (r: reg): Prop :=
-  match i with
-  | LLPhi (_, dst) _ => r = dst
-  end.
+Inductive InstUses: inst -> reg -> Prop :=
+  | uses_ld:
+    forall (dst: (ty * reg)) (next: node) (addr: reg),
+      InstUses (LLLd dst next addr) addr
+  | uses_mov:
+    forall (dst: (ty * reg)) (next: node) (src: reg),
+      InstUses (LLMov dst next src) src
+  | uses_select_cond:
+    forall (dst: (ty * reg)) (next: node) (cond: reg) (vt: reg) (vf: reg),
+      InstUses (LLSelect dst next cond vt vf) cond
+  | uses_select_true:
+    forall (dst: (ty * reg)) (next: node) (cond: reg) (vt: reg) (vf: reg),
+      InstUses (LLSelect dst next cond vt vf) vt
+  | uses_select_false:
+    forall (dst: (ty * reg)) (next: node) (cond: reg) (vt: reg) (vf: reg),
+      InstUses (LLSelect dst next cond vt vf) vf
+  | uses_unop:
+    forall (dst: (ty * reg)) (next: node) (op: unop) (arg: reg),
+      InstUses (LLUnop dst next op arg) arg
+  | uses_binop_lhs:
+    forall (dst: (ty * reg)) (next: node) (op: binop) (lhs: reg) (rhs: reg),
+      InstUses (LLBinop dst next op lhs rhs) lhs
+  | uses_binop_rhs:
+    forall (dst: (ty * reg)) (next: node) (op: binop) (lhs: reg) (rhs: reg),
+      InstUses (LLBinop dst next op lhs rhs) rhs
+  | uses_syscall_sno:
+    forall (dst: reg) (next: node) (sno: reg) (args: list reg),
+      InstUses (LLSyscall dst next sno args) sno
+  | uses_syscall_arg:
+    forall (dst: reg) (next: node) (sno: reg) (arg: reg) (args: list reg)
+      (ARG: In arg args),
+      InstUses (LLSyscall dst next sno args) arg
+  | uses_call_callee:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg),
+      InstUses (LLCall dst next callee args) callee
+  | uses_call_arg:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (arg: reg) (args: list reg)
+      (ARG: In arg args),
+      InstUses (LLCall dst next callee args) arg
+  | uses_invoke_callee:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: node),
+      InstUses (LLInvoke dst next callee args exn) callee
+  | uses_invoke_arg:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (arg: reg) (args: list reg) (exn: node)
+      (ARG: In arg args),
+      InstUses (LLInvoke dst next callee args exn) arg
+  | uses_tcall_callee:
+    forall (callee: reg) (args: list reg),
+      InstUses (LLTCall callee args) callee
+  | uses_tcall_arg:
+    forall (callee: reg) (arg: reg) (args: list reg)
+      (ARG: In arg args),
+      InstUses (LLTCall callee args) arg
+  | uses_tinvoke_callee:
+    forall (callee: reg) (args: list reg) (exn: node),
+      InstUses (LLTInvoke callee args exn) callee
+  | uses_tinvoke_arg:
+    forall (callee: reg) (arg: reg) (args: list reg) (exn: node)
+      (ARG: In arg args),
+      InstUses (LLTInvoke callee args exn) arg
+  | uses_st_addr:
+    forall (next: node) (addr: reg) (val: reg),
+      InstUses (LLSt next addr val) addr
+  | uses_st_val:
+    forall (next: node) (addr: reg) (val: reg),
+      InstUses (LLSt next addr val) val
+  | uses_ret:
+    forall (value: reg),
+      InstUses (LLRet (Some value)) value
+  | uses_jcc:
+    forall (cond: reg) (bt: node) (bf: node),
+      InstUses (LLJcc cond bt bf) cond
+  .
 
-Definition InstUses (i: inst) (r: reg): Prop :=
-  match i with
-  | LLLd _ _ addr => addr = r
-  | LLArg _ _ _ => False
-  | LLInt8 _ _ _ => False
-  | LLInt16 _ _ _ => False
-  | LLInt32 _ _ _ => False
-  | LLInt64 _ _ _ => False
-  | LLMov _ _ src => src = r
-  | LLFrame _ _ _ _ => False
-  | LLGlobal _ _ _ _ => False
-  | LLUndef _ _ => False
-  | LLUnop _ _ _ arg => arg = r
-  | LLBinop _ _ _ lhs rhs => lhs = r \/ rhs = r
-  | LLSelect _ _ cond vt vf => cond = r \/ vt = r \/ vf = r
-  | LLSyscall _ _ sno args => sno = r \/ In r args
-  | LLCall _ _ callee args => callee = r \/ In r args
-  | LLInvoke _ _ callee args _ => callee = r \/ In r args
-  | LLTCall callee args => callee = r \/ In r args
-  | LLTInvoke callee args _ => callee = r \/ In r args
-  | LLSt _ addr val => addr = r \/ val = r
-  | LLRet value =>
-    match value with
-    | None => False
-    | Some value' => value' = r
-    end
-  | LLJcc cond _ _ => cond = r
-  | LLJmp _ => False
-  | LLTrap => False
-  end.
-
-Definition PhiUses (p: phi) (n: reg) (r: reg): Prop :=
-  match p with
-  | LLPhi _ ins => Exists (fun phi_in =>
-    match phi_in with
-    | (n', r') => n' = n /\ r' = r
-    end) ins
-  end.
+Inductive PhiUses: phi -> reg -> reg -> Prop :=
+  | phi_uses:
+    forall (dst: (ty * reg)) (ins: list (node * reg)) (n: node) (r: reg)
+      (ARG: In (n, r) ins),
+      PhiUses (LLPhi dst ins) n r
+  .
 
 Definition PhiBlockUses (phis: list phi) (n: node) (r: reg): Prop :=
   Exists (fun phi => PhiUses phi n r) phis.
 
-Definition Succeeds (i: inst) (succ: node): Prop :=
-  match i with
-  | LLLd _ next _ => next = succ
-  | LLArg _ next _ => next = succ
-  | LLInt8 _ next _ => next = succ
-  | LLInt16 _ next _ => next = succ
-  | LLInt32 _ next _ => next = succ
-  | LLInt64 _ next _ => next = succ
-  | LLMov _ next _ => next = succ
-  | LLFrame _ next _ _ => next = succ
-  | LLGlobal _ next _ _ => next = succ
-  | LLUndef _ next => next = succ
-  | LLUnop _ next _ _ => next = succ
-  | LLBinop _ next _ _ _ => next = succ
-  | LLSelect _ next _ _ _ => next = succ
-  | LLSyscall _ next _ _ => next = succ
-  | LLCall _ next _ _ => next = succ
-  | LLInvoke _ next _ _ exn => next = succ \/ exn = succ
-  | LLTCall _ _ => False
-  | LLTInvoke _ _ exn => exn = succ
-  | LLSt next _ _ => next = succ
-  | LLRet _ => False
-  | LLJcc _ bt bf => bt = succ \/ bf = succ
-  | LLJmp target => target = succ
-  | LLTrap => False
-  end.
+Inductive Succeeds: inst -> node -> Prop :=
+  | succ_arg:
+    forall (dst: (ty * reg)) (next: node) (index: nat),
+      Succeeds (LLArg dst next index) next
+  | succ_int8:
+    forall (dst: reg) (next: node) (value: INT8.t),
+      Succeeds (LLInt8 dst next value) next
+  | succ_int16:
+    forall (dst: reg) (next: node) (value: INT16.t),
+      Succeeds (LLInt16 dst next value) next
+  | succ_int32:
+    forall (dst: reg) (next: node) (value: INT32.t),
+      Succeeds (LLInt32 dst next value) next
+  | succ_int64:
+    forall (dst: reg) (next: node) (value: INT64.t),
+      Succeeds (LLInt64 dst next value) next
+  | succ_frame:
+    forall (dst: reg) (next: node) (object: positive) (offset: nat),
+      Succeeds (LLFrame dst next object offset) next
+  | succ_global:
+    forall (dst: reg) (next: node) (object: positive) (offset: nat),
+      Succeeds (LLGlobal dst next object offset) next
+  | succ_undef:
+    forall (dst: (ty * reg)) (next: node),
+      Succeeds (LLUndef dst next) next
+  | succ_ld:
+    forall (dst: (ty * reg)) (next: node) (addr: reg),
+      Succeeds (LLLd dst next addr) next
+  | succ_mov:
+    forall (dst: (ty * reg)) (next: node) (src: reg),
+      Succeeds (LLMov dst next src) next
+  | succ_select:
+    forall (dst: (ty * reg)) (next: node) (cond: reg) (vt: reg) (vf: reg),
+      Succeeds (LLSelect dst next cond vt vf) next
+  | succ_unop:
+    forall (dst: (ty * reg)) (next: node) (op: unop) (arg: reg),
+      Succeeds (LLUnop dst next op arg) next
+  | succ_binop:
+    forall (dst: (ty * reg)) (next: node) (op: binop) (lhs: reg) (rhs: reg),
+      Succeeds (LLBinop dst next op lhs rhs) next
+  | succ_syscall:
+    forall (dst: reg) (next: node) (sno: reg) (args: list reg),
+      Succeeds (LLSyscall dst next sno args) next
+  | succ_call:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg),
+      Succeeds (LLCall dst next callee args) next
+  | succ_invoke_next:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: node),
+      Succeeds (LLInvoke dst next callee args exn) next
+  | succ_invoke_exn:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: node),
+      Succeeds (LLInvoke dst next callee args exn) exn
+  | succ_tinvoke:
+    forall (callee: reg) (args: list reg) (exn: node),
+      Succeeds (LLTInvoke callee args exn) exn
+  | succ_st:
+    forall (next: node) (addr: reg) (val: reg),
+      Succeeds (LLSt next addr val) next
+  | succ_jcc_true:
+    forall (cond: reg) (bt: node) (bf: node),
+      Succeeds (LLJcc cond bt bf) bt
+  | succ_jcc_false:
+    forall (cond: reg) (bt: node) (bf: node),
+      Succeeds (LLJcc cond bt bf) bf
+  | succ_jmp:
+    forall (target: node),
+      Succeeds (LLJmp target) target
+  .
 
 Definition is_terminator (i: inst): bool :=
   match i with
@@ -234,8 +335,8 @@ Definition is_terminator (i: inst): bool :=
   | LLUnop _ _ _ _ => false
   | LLBinop _ _ _ _ _ => false
   | LLSelect _ _ _ _ _ => false
-  | LLSyscall _ _ _ _ => false
-  | LLCall _ _ _ _ => false
+  | LLSyscall _ _ _ _ => true
+  | LLCall _ _ _ _ => true
   | LLInvoke _ _ _ _ _ => true
   | LLTCall _ _ => true
   | LLTInvoke _ _ _ => true
@@ -246,8 +347,68 @@ Definition is_terminator (i: inst): bool :=
   | LLTrap => true
   end.
 
-Definition Terminator (i: inst): Prop :=
-  is_terminator i = true.
+Definition has_effect (i: inst): bool :=
+  match i with
+  | LLLd _ _ _ => false
+  | LLArg _ _ _ => false
+  | LLInt8 _ _ _ => false
+  | LLInt16 _ _ _ => false
+  | LLInt32 _ _ _ => false
+  | LLInt64 _ _ _ => false
+  | LLMov _ _ _ => false
+  | LLFrame _ _ _ _ => false
+  | LLGlobal _ _ _ _ => false
+  | LLUndef _ _ => false
+  | LLUnop _ _ _ _ => false
+  | LLBinop _ _ _ _ _ => false
+  | LLSelect _ _ _ _ _ => false
+  | LLSyscall _ _ _ _ => true
+  | LLCall _ _ _ _ => true
+  | LLInvoke _ _ _ _ _ => true
+  | LLTCall _ _ => true
+  | LLTInvoke _ _ _ => true
+  | LLSt next _ _ => true
+  | LLRet _ => false
+  | LLJcc _ _ _ => false
+  | LLJmp _ => false
+  | LLTrap => true
+  end.
+
+Inductive Terminator: inst -> Prop :=
+  | term_ret:
+    forall (ret: option reg),
+      Terminator (LLRet ret)
+  | term_jcc:
+    forall (cond: reg) (bt: node) (bf: node),
+      Terminator (LLJcc cond bt bf)
+  | term_jmp:
+    forall (target: node),
+      Terminator (LLJmp target)
+  | term_trap:
+    Terminator LLTrap
+  | term_syscall:
+    forall (dst: reg) (next: node) (sno: reg) (args: list reg),
+      Terminator (LLSyscall dst next sno args)
+  | term_call:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg),
+      Terminator (LLCall dst next callee args)
+  | term_tcall:
+    forall (callee: reg) (args: list reg),
+      Terminator (LLTCall callee args)
+  | term_tinvoke:
+    forall (callee: reg) (args: list reg) (exn: node),
+      Terminator (LLTInvoke callee args exn)
+  | term_invoke:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: node),
+      Terminator (LLInvoke dst next callee args exn)
+  .
+
+Lemma is_terminator_terminator:
+  forall (i: inst),
+    is_terminator i = true <-> Terminator i.
+Proof.
+  intros i. split; intros H; destruct i; try inversion H; constructor.
+Qed.
 
 Section FUNCTION.
   Variable f: func.
@@ -278,22 +439,23 @@ Section FUNCTION.
         UsedAt n r
     .
 
-  Definition SuccOf (n: node) (m: node): Prop :=
-    match f.(fn_insts) ! n, f.(fn_insts) ! m with
-    | Some inst, Some _ => Succeeds inst m
-    | _, _ => False
-    end.
+  Inductive SuccOf: node -> node -> Prop :=
+    | succ_of:
+        forall (n: node) (m: node) (i: inst)
+          (HN: Some i = f.(fn_insts) ! n)
+          (HM: None <> f.(fn_insts) ! m)
+          (SUCC: Succeeds i m),
+          SuccOf n m.
 
-  Definition TermAt (n: node): Prop :=
-    match f.(fn_insts) ! n with
-    | None => False
-    | Some inst => Terminator inst
-    end.
-
+  Inductive TermAt: node -> Prop :=
+    | term_at:
+      forall (i: inst) (n: node)
+        (INST: Some i = f.(fn_insts) ! n)
+        (TERM: Terminator i),
+        TermAt n.
 End FUNCTION.
 
 Definition get_successors (i: inst) :=
-
   match i with
   | LLLd _ next _ => [next]
   | LLArg _ next _ => [next]
@@ -324,20 +486,14 @@ Lemma get_successors_correct:
   forall (i: inst) (succ: node),
     In succ (get_successors i) <-> Succeeds i succ.
 Proof.
-  split.
+  split; intros H.
   {
-    intros Hin.
-    unfold get_successors in Hin.
-    unfold Succeeds.
-    destruct i;
-    repeat (destruct Hin; destruct H; subst; try inversion H; auto).
+    unfold get_successors in H.
+    destruct i; repeat destruct H as [H|H];
+    subst; try inversion H; constructor.
   }
   {
-    intros Hsucc.
-    unfold Succeeds in Hsucc.
-    unfold get_successors.
-    destruct i;
-    try destruct Hsucc; try inversion H; subst; simpl; auto.
+    inversion H; simpl; auto.
   }
 Qed.
 
@@ -360,36 +516,27 @@ Proof.
   split.
   {
     intros Hin.
-    unfold get_predecessors in Hin. unfold SuccOf. unfold Succeeds.
+    unfold get_predecessors in Hin.
     destruct ((fn_insts f) ! n) eqn:Einst.
     {
       apply PTrie.keys_inversion in Hin.
       destruct Hin as [k Hin].
       apply PTrie.map_opt_inversion in Hin.
       destruct Hin as [inst [Hinst Hpred]].
-      rewrite <- Hinst.
-      unfold get_successors in Hpred. unfold existsb in Hpred.
-      destruct inst; repeat match goal with
-        | [ H: Pos.eqb ?v n = false |- _ ] =>
-          clear H;
-          simpl in *
-        | [ H: Pos.eqb ?v n = true |- _ ] =>
-          apply Pos.eqb_eq in H;
-          subst n;
-          simpl in Hpred;
-          inversion Hpred;
-          auto
-        | [ H: context [ Pos.eqb ?v n ] |- _ ] =>
-          destruct (Pos.eqb v n) eqn:E
-        | [ H: Some ?v = None |- _ ] =>
-          inversion H
-        | [ H: context [ LLInvoke _ _ _ _ ?exn ] |- _ ] =>
-          match exn with
-          | context [ None ] => simpl
-          | context [ Some ] => simpl
-          | _ => destruct exn
-          end
-        end.
+      apply succ_of with (i := inst); auto.
+      { intros contra. rewrite Einst in contra. inversion contra. }
+      {
+        unfold get_successors in Hpred. unfold existsb in Hpred.
+        destruct inst; simpl;
+          repeat match goal with
+          | [ H: context [ Pos.eqb ?v n ] |- _ ] =>
+            destruct (Pos.eqb v n) eqn:E;
+            simpl in H;
+            [apply Pos.eqb_eq in E; subst; constructor|clear E]
+          | [ H: Some ?v = None |- _ ] =>
+            inversion H
+          end.
+      }
     }
     {
       inversion Hin.
@@ -397,29 +544,14 @@ Proof.
   }
   {
     intros Hsucc.
-    unfold SuccOf in Hsucc.
-    destruct ((fn_insts f) ! pred) as [inst|] eqn:Epred; [|inversion Hsucc].
-    destruct ((fn_insts f) ! n) as [inst'|] eqn:En; [|inversion Hsucc].
-    unfold Succeeds in Hsucc.
+    inversion Hsucc.
+    destruct ((fn_insts f) ! n) as [inst'|] eqn:En; try contradiction.
     unfold get_predecessors.
-    rewrite En.
-    destruct inst; try destruct exn; repeat match goal with
-    | [ H: _ \/ _ |- _ ] =>
-      destruct H
-    | [ H: Some _ = Some _ |- _ ] =>
-      inversion H; clear H
-    | [ H: ?next = n |- _ ] =>
-      apply PTrie.values_correct with (k := next)
-    | [ H: (fn_insts f) ! pred = Some ?inst |- _ ] =>
-      apply PTrie.keys_correct with (v := inst);
-      apply PTrie.filter_correct;
-        [ symmetry; apply Epred
-        | apply List.existsb_exists; exists n;
-          split;
-          [ simpl; auto
-          | apply Pos.eqb_refl
-          ]
-        ]
-    end.
+    rewrite En. subst. clear HM.
+    apply PTrie.keys_correct with (v := i).
+    apply PTrie.filter_correct; auto.
+    apply List.existsb_exists. exists n.
+    split; [|apply Pos.eqb_eq; reflexivity].
+    destruct i; inversion SUCC; simpl; auto.
   }
 Qed.

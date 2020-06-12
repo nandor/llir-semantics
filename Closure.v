@@ -8,33 +8,32 @@ Require Import Coq.funind.FunInd.
 Require Import Coq.funind.Recdef.
 
 Require Import LLIR.Maps.
-Require Import LLIR.State.
 
 Import ListNotations.
 
 
 
-Definition relation := PTrie.t reg.
+Definition relation := PTrie.t positive.
 
 
 Section CLOSURE.
 
   Variable loads: relation.
 
-  Inductive chain: reg -> reg -> Prop :=
+  Inductive chain: positive -> positive -> Prop :=
     | closure_chain_elem:
-      forall (dst: reg) (src: reg)
+      forall (dst: positive) (src: positive)
         (HE: Some src = loads ! dst),
         chain dst src
     | closure_chain_step:
-      forall (dst: reg) (mid: reg) (src: reg)
+      forall (dst: positive) (mid: positive) (src: positive)
         (HL: chain mid src)
         (HR: chain dst mid),
         chain dst src
     .
 
   Definition is_relation (l: relation): Prop :=
-    forall (dst: reg) (src: reg),
+    forall (dst: positive) (src: positive),
       Some src = l ! dst -> chain dst src.
 
   Lemma is_valid_empty:
@@ -45,7 +44,7 @@ Section CLOSURE.
 
   Hypothesis H_loads_valid: is_relation loads.
 
-  Definition find_match (l: relation) (src: reg): reg :=
+  Definition find_match (l: relation) (src: positive): positive :=
     match l ! src with
     | None => src
     | Some dst => dst
@@ -54,7 +53,7 @@ Section CLOSURE.
   Lemma find_match_chain:
     forall (l: relation),
       is_relation l ->
-      forall (s: reg) (s': reg),
+      forall (s: positive) (s': positive),
         s' = find_match l s -> s = s' \/ chain s s'.
   Proof.
     intros l Hvalid src src' Hfind.
@@ -64,7 +63,7 @@ Section CLOSURE.
     - left. auto.
   Qed.
 
-  Definition update_map (l: relation) (d': reg) (s': reg): relation :=
+  Definition update_map (l: relation) (d': positive) (s': positive): relation :=
     PTrie.map (fun d s => if Pos.eqb s d' then s' else s) l.
 
   Example update_map_example :=
@@ -86,7 +85,7 @@ Section CLOSURE.
   Lemma update_map_chain:
     forall (l: relation),
       is_relation l ->
-      forall (d: reg) (s: reg),
+      forall (d: positive) (s: positive),
         chain d s ->
         is_relation (update_map l d s).
   Proof.
@@ -102,13 +101,13 @@ Section CLOSURE.
     - subst. apply Hvalid. apply Heq.
   Qed.
 
-  Definition closure_helper (acc: relation) (dst: reg) (src: reg): relation :=
+  Definition closure_helper (acc: relation) (dst: positive) (src: positive): relation :=
     let src' := find_match acc src in
     let acc_u := update_map acc dst src' in
     PTrie.set acc_u dst src'.
 
   Definition closure_helper_valid:
-    forall (dst: PTrie.key) (src: reg) (acc: relation),
+    forall (dst: PTrie.key) (src: positive) (acc: relation),
       is_relation acc ->
       Some src = loads ! dst ->
       is_relation (closure_helper acc dst src).

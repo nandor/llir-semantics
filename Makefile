@@ -9,12 +9,10 @@ COQCOPTS ?= -w -undeclared-scope
 
 COQC=$(COQBIN)coqc -q $(COQINCLUDES) $(COQCOPTS)
 COQDEP=$(COQBIN)coqdep $(COQINCLUDES)
-COQEXEC=$(COQBIN)coqtop $(COQINCLUDES) -batch -load-vernac-source
 
 PROOFS=\
 	Values.vo\
 	Maps.vo\
-	State.vo\
 	LLIR.vo\
 	Export.vo\
 	SmallStep.vo\

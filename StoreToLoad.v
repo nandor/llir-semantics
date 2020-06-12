@@ -132,10 +132,7 @@ Section LOAD_PROPERTIES.
     destruct Hstore as [orig [Hst_at Hsdom]].
     inversion Hst_at.
     assert (Hused_at: UsedAt f orig src).
-    {
-      apply used_at_inst with (i := LLSt addr1 src next0); auto.
-      unfold InstUses; auto.
-    }
+    { apply used_at_inst with (i := LLSt addr1 src next0); auto; constructor. }
     destruct H_f_valid as [Huses_have_defs Huniq].
     unfold uses_have_defs in Huses_have_defs.
     generalize (Huses_have_defs orig src Hused_at).
@@ -144,10 +141,7 @@ Section LOAD_PROPERTIES.
     exists def. exists k.
     split. apply Hdefs.
     split.
-    {
-      apply defined_at_inst with (i := LLLd (t, dst) next addr); auto.
-      unfold InstDefs; auto.
-    }
+    { apply defined_at_inst with (i := LLLd (t, dst) next addr); auto; constructor. }
     apply sdom_dom.
     apply dom_trans with (m := orig); auto. inversion Hsdom; auto.
     intros contra.
@@ -215,40 +209,44 @@ Section LOAD_PROPERTIES.
       ).
   Proof.
     intros user user' r Huser' Huses.
-    rewrite Huser' in Huses.
-    unfold rewrite_inst in Huses.
-    unfold rewrite_inst_uses in Huses.
-    unfold rewrite_reg in Huses.
-    unfold rewrite_inst in Huser'.
-    unfold rewrite_inst_uses in Huser'.
-    unfold rewrite_reg in Huser'.
-    unfold InstUses in Huses.
-    unfold InstUses.
-    destruct user eqn:Euser;
-      repeat match goal with
-      | [ |- context [loads' ! ?reg] ] =>
-        destruct (loads' ! reg) eqn:?reg
-      | [ H: _ ! ?reg = Some ?v |- context [ _ ! _ = Some ?v ] ] =>
-        right; exists reg; auto
-      | [ H: _ = ?r |- context [ Some ?r ] ] =>
-        rewrite <- H
-      | [ H0: ?loads ! ?reg = None, H1: ?loads ! ?reg = Some _ |- _ ] =>
-        rewrite H0 in H1; inversion H1
-      | [ H: ?a = ?b |- _ ] =>
-        subst b
-      | [ H: (_ = r) \/ _ |- _ ] =>
-        destruct H
-      | [ H: False |- _ ] =>
-        inversion H
-      | [ dst: ty * reg |- _] =>
-        destruct dst
-      | [H: In ?r ?args |- _ ] =>
-        apply in_map_iff in H;
-        destruct H as [x [Hr Hin]]
-      | [ H: context [ option_map ?f ?v ] |- _ ] =>
-        destruct value; simpl in H
-      | [ |- _ ] =>
-        auto
+    subst user'.
+    destruct user eqn:Euser; inversion Huses; clear Huses;
+    match goal with
+    | [ H: Some ?v' = option_map (rewrite_reg loads') ?v |- _ ] =>
+      destruct v as [v''|]eqn:Ev; simpl in H; inversion H as [H']; 
+      subst v'; symmetry in H'; rewrite <- H'
+    | [ |- _ ] =>
+      idtac
+    end;
+    match goal with
+    | [ H: rewrite_reg loads' ?old = r 
+      |- context [ loads' ! (rewrite_reg loads' ?old) = None ] 
+      ] =>
+      unfold rewrite_reg in H;
+      unfold rewrite_reg;
+      destruct (loads' ! old) eqn:Eold;
+      [ subst p; right; exists old; split; [auto|constructor]
+      | left; split; [assumption|constructor]
+      ]
+    | [ ARGS: In r (map (rewrite_reg loads') ?args)
+      , ARG: ?arg = r
+      |- _ 
+      ] =>
+      apply in_map_iff in ARGS;
+      destruct ARGS as [x [RW IN]];
+      unfold rewrite_reg in RW;
+      destruct (loads' ! r) eqn:Er;
+      [ right; exists x; destruct (loads' ! x) eqn:Ex; split;
+        [ subst; auto
+        | constructor; auto
+        | subst; rewrite Ex in Er; inversion Er
+        | constructor; auto
+        ]
+      | destruct (loads' ! x) eqn:Ex;
+        [ right; exists x; split; [subst|constructor]; auto
+        | left; split; subst; constructor; auto
+        ]
+      ]
       end.
   Qed.
 
@@ -270,29 +268,22 @@ Section LOAD_PROPERTIES.
     unfold rewrite_phi in Huser'.
     unfold rewrite_phi_uses in Huser'.
     unfold rewrite_reg in Huser'.
-    unfold PhiUses in Huses.
-    unfold PhiUses.
-    destruct user.
-
-    apply Exists_exists in Huses.
-    destruct Huses as [[n' r'] [Hin [Hn Hr]]]. subst n' r'.
-    apply in_map_iff in Hin.
-    destruct Hin as [[n' r'] [Heq Hin]].
-
+    inversion Huses as [dst ins n' r' ARG H]; subst n' r'.
+    destruct user; inversion H; subst ins.
+    apply in_map_iff in ARG.
+    destruct ARG as [[n' r'] [Heq Hin]].
     destruct (Pos.eq_dec r r').
     {
       subst r'.
+      inversion Heq. subst n'.
       destruct (loads' ! r) eqn:E.
       {
-        inversion Heq. subst n' p.
         right. exists r; split; auto.
-        apply Exists_exists. exists (n, r). auto.
+        constructor; auto.
       }
       {
         left. split; auto.
-        apply Exists_exists.
-        inversion Heq.
-        exists (n', r); repeat split; auto.
+        constructor; auto.
       }
     }
     {
@@ -300,7 +291,7 @@ Section LOAD_PROPERTIES.
       {
         subst n' p.
         right. exists r'. split; auto.
-        apply Exists_exists. exists (n, r'). auto.
+        constructor; auto.
       }
       {
         subst r'. contradiction.
@@ -352,40 +343,54 @@ Section PROPAGATE_PROPERTIES.
       SuccOf f src dst <->
       SuccOf (propagate_store_to_load f) src dst.
   Proof.
-    remember (Aliasing.analyse f) as aa.
-    remember (ReachingStores.analyse f aa) as rs.
-    remember ((find_load_reg (fn_insts f) rs aa)) as loads.
     intros src dst.
     split.
     {
       intros Hsucc.
       unfold propagate_store_to_load.
-      unfold rewrite_insts.
-      unfold rewrite_inst.
-      unfold SuccOf in *.
-      simpl.
-      rewrite PTrie.map_get.
-      rewrite PTrie.map_get.
-      destruct ((fn_insts f) ! src) as [inst|]; try inversion Hsucc.
-      destruct ((fn_insts f) ! dst) as [inst'|]; try inversion Hsucc.
-      unfold rewrite_inst_uses. simpl.
-      unfold Succeeds in *.
-      destruct inst; try destruct dst0; subst; auto.
+      remember (Aliasing.analyse f) as aa.
+      remember (ReachingStores.analyse f aa) as rs.
+      remember ((find_load_reg (fn_insts f) rs aa)) as loads.
+      remember (closure loads) as loads'.
+      inversion Hsucc.
+      apply succ_of with (i := rewrite_inst i loads'); simpl.
+      {
+        unfold rewrite_insts.
+        rewrite PTrie.map_get.
+        rewrite <- HN; simpl.
+        reflexivity.
+      }
+      {
+        unfold rewrite_insts.
+        rewrite PTrie.map_get.
+        destruct ((fn_insts f) ! dst) eqn:Edst; [|contradiction].
+        simpl. intros contra. inversion contra.
+      }
+      {
+        unfold rewrite_inst.
+        unfold rewrite_inst_uses.
+        inversion SUCC; subst; constructor.
+      }
     }
     {
       intros Hsucc.
+      inversion Hsucc.
       unfold propagate_store_to_load in *.
       unfold rewrite_insts in *.
       unfold rewrite_inst in *.
-      unfold SuccOf in *.
-      simpl in Hsucc.
-      rewrite PTrie.map_get in Hsucc.
-      rewrite PTrie.map_get in Hsucc.
-      destruct ((fn_insts f) ! src) as [inst|]; try inversion Hsucc.
-      destruct ((fn_insts f) ! dst) as [inst'|]; try inversion Hsucc.
-      simpl in Hsucc.
-      unfold Succeeds in *.
-      destruct inst; try destruct dst0; subst; auto.
+      simpl in HN; rewrite PTrie.map_get in HN.
+      simpl in HM; rewrite PTrie.map_get in HM.
+      remember (Aliasing.analyse f) as aa.
+      remember (ReachingStores.analyse f aa) as rs.
+      remember ((find_load_reg (fn_insts f) rs aa)) as loads.
+      remember (closure loads) as loads'.
+      destruct ((fn_insts f) ! src) as [isrc|] eqn:Esrc; simpl in HN; inversion HN.
+      unfold rewrite_inst_uses in HN.
+      destruct ((fn_insts f) ! dst) as [idst|] eqn:Edst; simpl in HM; try contradiction.
+      apply succ_of with (i := isrc).
+      { auto. }
+      { rewrite Edst; intros contra; inversion contra. }
+      { destruct isrc; subst i; simpl in SUCC; inversion SUCC; constructor. }
     }
   Qed.
 
@@ -427,8 +432,8 @@ Section PROPAGATE_PROPERTIES.
         simpl in INST. apply PTrie.map_in in INST.
         destruct INST as [inst [Hloc Hdef]]. subst i.
         apply defined_at_inst with (i := inst). apply Hloc.
-        unfold rewrite_inst, rewrite_inst_uses, InstDefs in DEFS. unfold InstDefs.
-        destruct inst; try destruct dst; auto.
+        unfold rewrite_inst, rewrite_inst_uses in DEFS. 
+        destruct inst; inversion DEFS; constructor.
       }
       {
         unfold propagate_store_to_load, rewrite_phis in PHIS.
@@ -442,11 +447,11 @@ Section PROPAGATE_PROPERTIES.
         destruct Hin_phi as [phi [Hrw Hin]].
         apply Exists_exists.
         exists phi. split. auto.
-        unfold PhiDefs in *.
         destruct phi'; destruct phi.
         unfold rewrite_phi, rewrite_phi_uses in Hrw.
         inversion Hrw.
-        auto.
+        inversion Hdef_phi'.
+        constructor.
       }
     }
     {
@@ -467,8 +472,8 @@ Section PROPAGATE_PROPERTIES.
           auto.
         }
         {
-          unfold InstDefs in *.
-          destruct i; try destruct dst; auto.
+          unfold rewrite_inst; unfold rewrite_inst_uses.
+          destruct i; try destruct dst; inversion DEFS; constructor.
         }
       }
       {
@@ -501,9 +506,10 @@ Section PROPAGATE_PROPERTIES.
             split; auto.
           }
           {
-            unfold PhiDefs in *.
+            unfold rewrite_phi; unfold rewrite_phi_uses.
             destruct phi.
-            auto.
+            inversion Hdef_phi.
+            constructor.
           }
         }
       }
@@ -537,7 +543,10 @@ Section PROPAGATE_PROPERTIES.
         unfold rewrite_insts in INST.
         apply PTrie.map_in in INST.
         destruct INST as [i_use [Hin Hwr]].
-        generalize (propagate_inst_use_inversion loads' i_use i r Hwr USES).
+        generalize (propagate_inst_use_inversion 
+          f aa rs loads loads' Heqloads Heqloads' 
+          i_use i r Hwr USES
+        ).
         intros Hinv.
         generalize (Hdefs use r).
         intros Huse_implies_def.

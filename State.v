@@ -6,30 +6,3 @@ Require Import Coq.ZArith.ZArith.
 
 Require Import LLIR.Values.
 Require Import LLIR.Maps.
-
-Notation node := positive.
-
-Notation reg := positive.
-
-
-
-Record atom := mkdata
-  { dt_size: positive
-  ; dt_data: PTrie.t qword
-  }.
-
-Record frame := mkframe
-  { fr_data: PTrie.t atom
-  ; fr_regs: PTrie.t value
-  ; fr_args: PTrie.t value
-  ; fr_func: positive
-  ; fr_pc: node
-  ; fr_retaddr: node
-  }.
-
-Record state :=
-  { st_stack: list frame
-  }.
-
-
-Definition trace := list (positive * list qword).
