@@ -282,10 +282,62 @@ Section FUNCTION.
     apply sdom_dom. apply Hmn. apply Ene.
   Qed.
 
+  Theorem in_path_split_app:
+    forall (n: node) (m: node) (p: list node) (mid: node),
+      Path n p m ->
+      In mid p ->
+      exists (l: list node) (r: list node),
+        Path n (mid::l) mid
+        /\
+        p = r ++ [mid] ++ l.
+  Proof.
+    intros n m p mid Hpath Hin.
+    induction Hpath.
+    {
+      inversion Hin; subst; [|inversion H].
+      exists []. exists [].
+      split; auto. constructor; auto.
+    }
+    {
+      destruct (Pos.eq_dec mid to); subst.
+      {
+        exists p. exists [].
+        split; auto.
+        apply path_cons with (next := next); auto.
+      }
+      {
+        destruct Hin.
+        { symmetry in H. contradiction. }
+        {
+          apply IHHpath in H.
+          destruct H as [l [r [Hpath' Happ]]].
+          exists l. exists (to :: r).
+          split; auto.
+          rewrite <- app_comm_cons.
+          rewrite Happ.
+          reflexivity.
+        }
+      }
+    }
+  Qed.
+
   Theorem dom_trans:
     forall (n: node) (m: node) (p: node),
       Dominates n m -> Dominates m p -> Dominates n p.
-  Admitted.
+  Proof.
+    intros n m p Hnm Hmp.
+    inversion Hmp; subst; auto.
+    inversion Hnm; [subst; auto|].
+    destruct (Pos.eq_dec m p); [subst; auto|].
+    apply dom_path; auto.
+    intros p' Hpath. remember Hpath as Hin; clear HeqHin. 
+    apply PATH in Hin.
+    generalize (in_path_split_app entry p p' m Hpath Hin); intros Hsplit.
+    destruct Hsplit as [l [r [Hl Happ]]].
+    rewrite Happ.
+    apply in_or_app.
+    right. apply PATH0. rewrite <- app_comm_cons. rewrite app_nil_l. auto.
+  Qed.
 
   Theorem dom_step:
     forall (n: node) (m: node),
