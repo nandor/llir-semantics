@@ -7,6 +7,7 @@ Require Import Coq.Lists.List.
 Require Import Coq.Bool.Bool.
 Require Import Coq.Classes.Equivalence.
 Require Import Coq.Classes.EquivDec.
+Require Import Coq.Logic.FinFun.
 
 Import ListNotations.
 
@@ -369,6 +370,11 @@ Module PTrie <: PARTIAL_MAP.
       forall (t: t V) (k: key) (v: V),
         Some v = get t k <-> In (k, v) (to_list t).
     Admitted.
+
+    Theorem to_list_nodup:
+      forall (t: t V),
+        NoDup (to_list t).
+    Admitted.
   End TO_LIST.
 
   Arguments to_list {V}.
@@ -528,6 +534,10 @@ Module PTrie <: PARTIAL_MAP.
       subst k0.
       apply Hr.
     Qed.
+
+    Theorem keys_nodup:
+      forall (t: t V), NoDup (keys t).
+    Admitted.
   End KEYS.
 
   Section EXTRACT.

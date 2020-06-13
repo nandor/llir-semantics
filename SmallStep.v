@@ -4,12 +4,14 @@
 
 Require Import Coq.Lists.List.
 Require Import Coq.ZArith.ZArith.
-Require Import Values.
-Require Import State.
-Require Import Maps.
+
+Require Import LLIR.Values.
+Require Import LLIR.Maps.
 Require Import LLIR.LLIR.
 Require Import LLIR.Dom.
 Require Import LLIR.Eval.
+Require Import LLIR.SSA.
+Require Import LLIR.Block.
 
 Import ListNotations.
 
@@ -134,7 +136,7 @@ Inductive star (p: prog): state -> trace -> state -> Prop :=
     forall (st: state),
       star p st [] st
   | star_step:
-    forall 
+    forall
       (st0: state) (st1: state) (st2: state)
       (tr0: trace) (tr1: trace) (tr: trace)
       (STAR: star p st0 tr0 st1)
@@ -142,42 +144,79 @@ Inductive star (p: prog): state -> trace -> state -> Prop :=
       star p st0 (tr0 ++ tr1) st2
   .
 
-(*
+Inductive stepN (p: prog): nat -> state -> trace -> state -> Prop :=
+  | step_0:
+    forall (st: state),
+      stepN p 0 st [] st
+  | step_S:
+    forall
+      (n: nat)
+      (st0: state) (st1: state) (st2: state)
+      (tr0: trace) (tr1: trace) (tr: trace)
+      (STEP_N: stepN p n st0 tr0 st1)
+      (STEP: step p st1 tr1 st2),
+      stepN p (S n) st0 (tr0 ++ tr1) st2
+  .
+
 Inductive ExecutionAt (p: prog): stk_state -> mem_state -> func -> node -> Prop :=
   | exec_at:
-    forall 
-      (id: positive) (ret_pc: node) (pc: node) (vregs: PTrie.t value) 
+    forall
+      (fr_data: PTrie.t atom) (fr_regs: PTrie.t value) (fr_args: PTrie.t value)
+      (fr_func: name) (fr_pc: node) (fr_retaddr: node)
       (frs: list frame) (mem: mem_state) (f: func)
-      (FUNC: Some f = p ! id)
-      (INST: None <> f.(fn_insts) ! pc)
+      (FUNC: Some f = p ! fr_func)
+      (INST: None <> f.(fn_insts) ! fr_pc)
       (r: reg),
-      ExecutionAt 
+      ExecutionAt
         p
-        (Frame id ret_pc vregs :: frs) 
-        mem 
+        (mkframe fr_data fr_regs fr_args fr_func fr_pc fr_retaddr :: frs)
+        mem
         f
-        pc.
+        fr_pc
+  .
 
-Theorem exec_bb:
-  forall (p: prog)
-    (stk: stk_state) (mem: mem_state) (f: func) (h: node) (n: node),
-    ExecutionAt p stk mem f h ->
-    BasicBlock f h n ->
-    exists (stk': stk_state) (mem': mem_state) (tr: trace),
-      star p (State stk mem h) tr (State stk' mem' n).
-Proof.
-  intros p stk mem f h n Hexec Hbb.
-  induction Hbb.
-  { exists stk. exists mem. exists []. apply star_refl. }
-  {
-    destruct ((fn_insts f) ! elem) as [inst|] eqn:Hinst; try contradiction.
-    apply IHHbb in Hexec. clear IHHbb.
-    destruct Hexec as [stk' [mem' [tr Hstart]]].
-    clear INST.
-    destruct inst.
+Section FUNCTION.
+  Variable f: func.
+  Hypothesis f_is_valid: is_valid f.
+
+  Definition has_header := fn_blocks_are_valid f f_is_valid.
+  (*
+  Theorem exec_bb:
+    forall (h: node) (n: node),
+      BasicBlock f h n ->
+      forall (p: prog) (stk: stk_state) (mem: mem_state),
+        ExecutionAt p stk mem f h ->
+        exists (stk': stk_state) (mem': mem_state) (tr: trace),
+          stepN
+            p
+            (get_inst_index f has_header n)
+            (State stk mem h)
+            tr
+            (State stk' mem' n).
+  Proof.
+    intros h n Hbb.
+    induction Hbb; intros p stk mem Hexec.
     {
-      
+      exists stk. exists mem. exists [].
+      apply (header_index_0 f has_header) in HEADER.
+      rewrite HEADER.
+      constructor.
     }
-  }
-Qed.
-*)
+    {
+      inversion PRED.
+      destruct i;
+        try match goal with
+        | [ H: Some ?inst = (fn_insts f) ! prev |- _ ] =>
+          assert (TermAt f prev);
+          [apply term_at with inst; auto; constructor |];
+          contradiction
+        end.
+      {
+        generalize (IHHbb p stk mem Hexec); intros Hstate.
+        destruct Hstate as [stk0 [mem0 [tr0 Hstep0]]].
+      }
+    }
+  Qed.
+  *)
+
+End FUNCTION.

@@ -2,15 +2,17 @@
 (* Licensing information is available in the LICENSE file. *)
 (* (C) 2020 Nandor Licker. All rights reserved. *)
 
-Require Import Coq.ZArith.ZArith.
-Require Import Coq.Lists.List.
-Require Import Coq.Program.Equality.
+Require Export Coq.ZArith.ZArith.
+Require Export Coq.Lists.List.
+Require Export Coq.Program.Equality.
 
-Require Import LLIR.LLIR.
-Require Import LLIR.Maps.
-Require Import LLIR.Dom.
-Require Import LLIR.Values.
-Require Import LLIR.Typing.
+Require Export LLIR.LLIR.
+Require Export LLIR.Maps.
+Require Export LLIR.Dom.
+Require Export LLIR.Block.
+Require Export LLIR.Values.
+Require Export LLIR.Typing.
+Require Export LLIR.SSA.
 
 Import ListNotations.
 

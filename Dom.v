@@ -4,7 +4,6 @@
 
 Require Import Coq.ZArith.ZArith.
 Require Import Coq.Lists.List.
-Require Import FunInd.
 
 Require Import LLIR.Values.
 Require Import LLIR.LLIR.
@@ -347,347 +346,82 @@ Section FUNCTION.
     inversion Hsdom.
     apply DOM.
   Qed.
-
-  Inductive BasicBlockHeader: node -> Prop :=
-    | block_header:
-      forall (header: node)
-        (REACH: Reachable header)
-        (TERM: forall (term: node), SuccOf f term header -> TermAt f term)
-        (INST: f.(fn_insts) ! header <> None),
-        BasicBlockHeader header
-    .
-
-  Inductive BasicBlock: node -> node -> Prop :=
-    | bb_header:
-      forall (header: node)
-        (HEADER: BasicBlockHeader header),
-          BasicBlock header header
-    | bb_elem:
-      forall (header: node) (prev: node) (elem: node)
-        (NOT_HEADER: header <> elem)
-        (NOT_ENTRY: entry <> elem)
-        (NOT_PREV: prev <> elem)
-        (BLOCK: BasicBlock header prev)
-        (PRED: SuccOf f prev elem)
-        (NOT_TERM: ~TermAt f prev)
-        (INST: f.(fn_insts) ! elem <> None)
-        (NO_PHI: f.(fn_phis) ! elem = None)
-        (UNIQ: forall (prev': node), SuccOf f prev' elem -> prev' = prev),
-          BasicBlock header elem
-    .
-
-  Theorem bb_reaches:
-    forall (header: node) (elem: node),
-      BasicBlock header elem -> Reachable elem.
-  Proof.
-    intros header elem Hbb.
-    induction Hbb.
-    inversion HEADER.
-    apply REACH.
-    apply reach_succ with (a := prev); auto.
-  Qed.
-
-  Theorem bb_has_header:
-    forall (header: node) (elem: node),
-      BasicBlock header elem -> BasicBlockHeader header.
-  Proof.
-    intros header elem Hbb.
-    induction Hbb.
-    apply HEADER.
-    apply IHHbb.
-  Qed.
-
-  Theorem bb_header_dom_nodes:
-    forall (header: node) (elem: node),
-      BasicBlock header elem -> Dominates header elem.
-  Proof.
-    intros header elem Hbb.
-    induction Hbb. apply dom_self.
-    apply dom_trans with (m := prev); auto.
-    apply dom_step.
-    repeat split.
-    + apply bb_reaches with (header := header). apply Hbb.
-    + apply PRED.
-    + apply NOT_ENTRY.
-    + intros n Hsucc. symmetry. apply UNIQ. apply Hsucc.
-  Qed.
-
-  Theorem bb_header_unique:
-    forall (elem: node) (header: node) (header': node),
-      BasicBlock header elem ->
-      BasicBlock header' elem ->
-      header = header'.
-  Proof.
-    intros elem header header'.
-    intros Hbb Hbb'.
-    induction Hbb'.
-    {
-      inversion Hbb; auto.
-      inversion HEADER.
-      apply TERM in PRED.
-      apply NOT_TERM in PRED.
-      inversion PRED.
-    }
-    {
-      apply IHHbb'.
-      inversion Hbb.
-      {
-        subst.
-        inversion HEADER.
-        apply TERM in PRED.
-        apply NOT_TERM in PRED.
-        inversion PRED.
-      }
-      {
-        subst.
-        apply UNIQ in PRED0.
-        subst prev0.
-        apply BLOCK.
-      }
-    }
-  Qed.
-
-  Theorem bb_elem_pred:
-    forall (header: node) (elem: node),
-      BasicBlock header elem ->
-        BasicBlockHeader elem
-        \/
-        forall (prev: node),
-          SuccOf f prev elem ->
-            BasicBlock header prev /\ Dominates prev elem.
-  Proof.
-    intros header elem Hblock.
-    inversion Hblock.
-    { left. auto. }
-    {
-      right.
-      intros prev' Hsucc.
-      apply UNIQ in Hsucc.
-      subst prev'.
-      split; auto.
-      apply dom_path.
-      {
-        intros p Hpath.
-        inversion Hpath; subst. contradiction.
-        right.
-        apply UNIQ in HD. subst next.
-        apply last_in_path with (x := entry). apply TL.
-      }
-      {
-        apply reach_succ with (a := prev). apply PRED.
-        apply bb_reaches with (header := header). apply BLOCK.
-      }
-    }
-  Qed.
-
-  Inductive BasicBlockSucc: node -> node -> Prop :=
-    | basic_block_succ:
-      forall (from: node) (to: node) (term: node)
-        (HDR_FROM: BasicBlock from term)
-        (HDR_TO: BasicBlockHeader to)
-        (SUCC: SuccOf f term to),
-        BasicBlockSucc from to
-    .
-
-  Inductive BasicBlockPath: node -> list node -> node -> Prop :=
-    | bb_path_nil:
-      forall (n: node)
-        (REACH: Reachable n)
-        (HEADER: BasicBlockHeader n),
-        BasicBlockPath n [n] n
-    | bb_path_cons:
-      forall (from: node) (next: node) (to: node) (p: list node)
-        (REACH: Reachable from)
-        (TL: BasicBlockPath from p next)
-        (HD: BasicBlockSucc next to),
-        BasicBlockPath from (to :: p) to
-    .
-
-  Inductive BasicBlockDominates: node -> node -> Prop :=
-    | bb_dom_self:
-      forall (n: node),
-        BasicBlockDominates n n
-    | bb_dom_path:
-      forall (a: node) (b: node)
-        (PATH: forall (p: list node), BasicBlockPath entry p b -> In a p)
-        (REACH: Reachable b),
-        BasicBlockDominates a b
-    .
-
-  Theorem bb_dom_dom:
-    forall (n: node) (m: node),
-      BasicBlockDominates n m -> Dominates n m.
-  Admitted.
-
-  Theorem bb_elem_dom:
-    forall (h: node) (e: node) (h': node) (e': node),
-      h <> h' ->
-      BasicBlock h e ->
-      BasicBlock h' e' ->
-      BasicBlockDominates h h' ->
-      Dominates e e'.
-  Admitted.
-
-  Theorem bb_elem_not_header:
-    forall (h: node) (e: node),
-      BasicBlock h e ->
-      BasicBlockHeader e ->
-      h = e.
-  Proof.
-    intros h e Hbb Hheader.
-    inversion Hbb; auto.
-    subst header elem.
-    inversion Hheader.
-    apply TERM in PRED.
-    contradiction.
-  Qed.
-
-
-  Inductive PathToElem: node -> list node -> node -> Prop :=
-    | path_elem_header:
-      forall (n: node)
-        (HEADER: BasicBlockHeader n),
-        PathToElem n [n] n
-    | path_elem_cons:
-      forall (header: node) (prev: node) (elem: node) (p: list node)
-        (BLOCK: BasicBlock header elem)
-        (TL: SuccOf f prev elem)
-        (HD: PathToElem header p prev)
-        (NH: header <> elem)
-        (NE: prev <> elem),
-        PathToElem header (elem :: p) elem
-    .
-
-  Theorem bb_path_to_elem:
-    forall (h: node) (e: node),
-      BasicBlock h e -> 
-        exists (p: list node), PathToElem h p e.
-  Proof.
-    intros h e Hbb.
-    induction Hbb.
-    {
-      exists [header].
-      apply path_elem_header.
-      auto.
-    }
-    {
-      destruct IHHbb as [p Hpath].
-      exists (elem :: p).
-      apply path_elem_cons with (prev := prev); auto.
-      apply bb_elem with (prev := prev); auto.
-    }
-  Qed.
-
-  Theorem bb_path_bb:
-    forall (h: node) (e: node) (p: list node),
-      PathToElem h p e -> BasicBlock h e.
-  Proof.
-    intros h e p Hpath.
-    inversion Hpath.
-    + constructor; auto.
-    + inversion BLOCK.
-      - constructor. auto.
-      - apply UNIQ in TL.
-        subst prev0 header0 elem0.
-        apply bb_elem with (prev := prev); auto.
-  Qed.
-
-  Theorem bb_path_no_loop:
-    forall (h: node) (p: list node),
-      PathToElem h p h -> p = [h].
-  Proof.
-    intros h p Hpath.
-    inversion Hpath; auto.
-    subst. contradiction.
-  Qed.
-
-  Theorem bb_path_no_term:
-    forall (h: node) (e: node) (p: list node),
-      PathToElem h p e ->
-        forall (n: node),
-          In n p -> n = e \/ ~TermAt f n.
-  Proof.
-    intros h e p Hpath.
-    induction Hpath; intros n' Hin.
-    inversion Hin; auto.
-    destruct Hin; auto.
-    right.
-    generalize (IHHpath n' H). intros Hind. clear IHHpath.
-    destruct Hind; auto.
-    inversion BLOCK.
-    - subst. contradiction.
-    - apply UNIQ in TL; subst; auto.
-  Qed.
-
-  Theorem bb_path_uniq:
-    forall (h: node) (e: node) (p: list node) (p': list node),
-      PathToElem h p e ->
-      PathToElem h p' e ->
-      p = p'.
-  Proof.
-    intros h e p p' Hp. generalize dependent p'.
-    induction Hp; intros p' Hp'.
-    symmetry; apply bb_path_no_loop; auto.
-    inversion Hp'; subst; try contradiction.
-    inversion BLOCK0; subst; try contradiction.
-    apply UNIQ in TL0; subst prev1.
-    apply UNIQ in TL; subst prev0.
-    apply IHHp in HD; subst p0.
-    reflexivity.
-  Qed.
-
-  Definition get_bb_pred (e: node): option node :=
-    match get_predecessors f e with
-    | [p] =>
-      match f.(fn_insts) ! p with
-      | Some inst => if is_terminator inst then None else Some p
-      | None => None
-      end
-    | _ => None
-    end.
-  (*
-  Theorem bb_elem_has_predecessor:
-    forall (h: node) (e: node),
-      BasicBlock h e ->
-      h <> e ->
-      exists (p: node), Some p = get_bb_pred e.
-  Proof.
-    intros h e Hbb Hne.
-    inversion Hbb; try contradiction.
-    exists prev.
-    unfold get_bb_pred.
-    remember (get_predecessors f e) as some_pred eqn:Esome_pred.
-    destruct some_pred.
-    {
-      apply get_predecessors_correct in PRED.
-      rewrite <- Esome_pred in PRED.
-      inversion PRED.
-    }
-    {
-      destruct some_pred.
-      {
-        assert (Hk: SuccOf f k e).
-        { 
-          apply get_predecessors_correct. 
-          rewrite <- Esome_pred. 
-          left. 
-          reflexivity. 
-        }
-        unfold SuccOf in 
-      }
-      {
-      
-      }
-    }
-  Qed.
-  *)
 End FUNCTION.
+
+Lemma eq_cfg_reach:
+  forall (f: func) (f': func),
+    f.(fn_entry) = f'.(fn_entry) ->
+    (forall (src: node) (dst: node), SuccOf f src dst <-> SuccOf f' src dst) ->
+    forall (n: node),
+      Reachable f n <-> Reachable f' n.
+Proof.
+  intros f f' Hentry Heq n.
+  split; intros H.
+  {
+    induction H.
+    { rewrite Hentry; constructor. }
+    {
+      apply reach_succ with (a := a); auto.
+      apply Heq; auto.
+    }
+  }
+  {
+    induction H.
+    { rewrite <- Hentry; constructor. }
+    {
+      apply reach_succ with (a := a); auto.
+      apply Heq; auto.
+    }
+  }
+Qed.
+
+Lemma eq_cfg_path:
+  forall (f: func) (f': func),
+    f.(fn_entry) = f'.(fn_entry) ->
+    (forall (src: node) (dst: node), SuccOf f src dst <-> SuccOf f' src dst) ->
+    forall (src: node) (path: list node) (dst: node),
+      Path f src path dst <-> Path f' src path dst.
+Proof.
+  intros f f' Hentry Heq src path dst.
+  split; (intros H;induction H;
+     [ apply path_nil;
+       generalize (eq_cfg_reach f f' Hentry Heq n); intros Hr; apply Hr; auto
+     | apply path_cons with (next := next); auto;
+        [ generalize (eq_cfg_reach f f' Hentry Heq from); intros Hr; apply Hr; auto
+        | apply Heq; auto
+        ]
+     ]).
+Qed.
 
 Lemma eq_cfg_dom:
   forall (f: func) (f': func),
+    f.(fn_entry) = f'.(fn_entry) ->
     (forall (src: node) (dst: node), SuccOf f src dst <-> SuccOf f' src dst) ->
     forall (src: node) (dst: node),
-      Dominates f src dst <->
-      Dominates f' src dst.
-Admitted.
-
+      Dominates f src dst <-> Dominates f' src dst.
+Proof.
+  intros f f' Hentry Heq n.
+  split; intros H.
+  {
+    induction H; constructor.
+    {
+      intros p Hpath. apply PATH.
+      generalize (eq_cfg_path f f' Hentry Heq (entry f) p b); intros Hp; apply Hp.
+      unfold entry; rewrite Hentry; auto.
+    }
+    {
+      generalize (eq_cfg_reach f f' Hentry Heq b); intros Hr; apply Hr; auto.
+    }
+  }
+  {
+    induction H; constructor.
+    {
+      intros p Hpath. apply PATH.
+      generalize (eq_cfg_path f f' Hentry Heq (entry f') p b); intros Hp; apply Hp.
+      unfold entry; rewrite <- Hentry; auto.
+    }
+    {
+      generalize (eq_cfg_reach f f' Hentry Heq b); intros Hr; apply Hr; auto.
+    }
+  }
+Qed.

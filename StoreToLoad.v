@@ -9,11 +9,11 @@ Require Import LLIR.Aliasing.
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 Require Import LLIR.Closure.
-Require Import LLIR.State.
 Require Import LLIR.Values.
 Require Import LLIR.SSA.
 Require Import LLIR.ReachingStores.
 Require Import LLIR.Dom.
+Require Import LLIR.Block.
 Require Import LLIR.Transform.
 
 Import ListNotations.
@@ -213,14 +213,14 @@ Section LOAD_PROPERTIES.
     destruct user eqn:Euser; inversion Huses; clear Huses;
     match goal with
     | [ H: Some ?v' = option_map (rewrite_reg loads') ?v |- _ ] =>
-      destruct v as [v''|]eqn:Ev; simpl in H; inversion H as [H']; 
+      destruct v as [v''|]eqn:Ev; simpl in H; inversion H as [H'];
       subst v'; symmetry in H'; rewrite <- H'
     | [ |- _ ] =>
       idtac
     end;
     match goal with
-    | [ H: rewrite_reg loads' ?old = r 
-      |- context [ loads' ! (rewrite_reg loads' ?old) = None ] 
+    | [ H: rewrite_reg loads' ?old = r
+      |- context [ loads' ! (rewrite_reg loads' ?old) = None ]
       ] =>
       unfold rewrite_reg in H;
       unfold rewrite_reg;
@@ -230,7 +230,7 @@ Section LOAD_PROPERTIES.
       ]
     | [ ARGS: In r (map (rewrite_reg loads') ?args)
       , ARG: ?arg = r
-      |- _ 
+      |- _
       ] =>
       apply in_map_iff in ARGS;
       destruct ARGS as [x [RW IN]];
@@ -394,17 +394,22 @@ Section PROPAGATE_PROPERTIES.
     }
   Qed.
 
+  Lemma preserves_entry:
+    f.(fn_entry) = (propagate_store_to_load f).(fn_entry).
+  Proof.
+    unfold propagate_store_to_load; auto.
+  Qed.
+
   Lemma preserves_dom:
     forall (src: node) (dst: node),
       Dominates f src dst <->
       Dominates (propagate_store_to_load f) src dst.
   Proof.
     intros src dst.
-    split;
-      intros Hdom;
-      apply (eq_cfg_dom f (propagate_store_to_load f));
-      try apply preserves_succ;
-      try apply Hdom.
+    split; intros Hdom;
+      apply (eq_cfg_dom f (propagate_store_to_load f) 
+        preserves_entry preserves_succ); 
+      auto.
   Qed.
 
   Lemma preserves_sdom:
@@ -417,6 +422,169 @@ Section PROPAGATE_PROPERTIES.
       intro Hdom; inversion Hdom;
       subst;
       apply sdom_dom; try apply STRICT; apply preserves_dom; apply DOM.
+  Qed.
+
+  Lemma preserves_term:
+    forall (n: node),
+      TermAt f n <-> TermAt (propagate_store_to_load f) n.
+  Proof.
+    intros n.
+    split; intros H;
+      unfold propagate_store_to_load in *;
+      unfold rewrite_insts in *;
+      remember (Aliasing.analyse f) as aa;
+      remember (ReachingStores.analyse f aa) as rs;
+      remember ((find_load_reg (fn_insts f) rs aa)) as loads;
+      remember (closure loads) as loads'.
+    {
+      inversion H.
+      apply term_at with (i := rewrite_inst i loads').
+      { simpl. rewrite PTrie.map_get. rewrite <- INST. simpl. auto. }
+      { 
+        inversion TERM; 
+        unfold rewrite_inst; unfold rewrite_inst_uses; 
+        constructor.
+      }
+    }
+    {
+      inversion H.
+      simpl in INST.
+      rewrite PTrie.map_get in INST.
+      destruct ((fn_insts f) ! n) as [inst|] eqn:Einst; simpl in INST; inversion INST.
+      apply term_at with (i := inst); auto.
+      subst i.
+      unfold rewrite_inst in TERM; unfold rewrite_inst_uses in TERM.
+      destruct inst; inversion TERM; constructor.
+    }
+  Qed.
+
+  Lemma preserves_blocks:
+    forall (h: node) (e: node),
+      BasicBlock f h e <->
+      BasicBlock (propagate_store_to_load f) h e.
+  Proof.
+    intros h e.
+    split; intros H.
+    {
+      induction H.
+      {
+        inversion HEADER.
+        apply bb_header.
+        apply block_header.
+        {
+          apply (eq_cfg_reach f (propagate_store_to_load f) 
+            preserves_entry preserves_succ); auto.
+        }
+        {
+          intros term Hsucc.
+          apply preserves_succ in Hsucc.
+          apply TERM in Hsucc.
+          apply preserves_term; auto.
+        }
+        {
+          intros contra.
+          destruct ((fn_insts f) ! header) eqn:Eheader; try contradiction.
+          unfold propagate_store_to_load in contra. 
+          unfold rewrite_insts in contra.
+          simpl in contra.
+          rewrite PTrie.map_get in contra.
+          rewrite Eheader in contra.
+          simpl in contra.
+          inversion contra.
+        }
+      }
+      {
+        apply bb_elem with (prev := prev); auto.
+        { apply preserves_succ; auto. }
+        { intros contra. apply preserves_term in contra. contradiction. }
+        {
+          intros contra.
+          destruct ((fn_insts f) ! elem) eqn:Eheader; try contradiction.
+          unfold propagate_store_to_load in contra. 
+          unfold rewrite_insts in contra.
+          simpl in contra.
+          rewrite PTrie.map_get in contra.
+          rewrite Eheader in contra.
+          simpl in contra.
+          inversion contra.
+        }
+        {
+          unfold propagate_store_to_load. 
+          unfold rewrite_phis.
+          simpl.
+          rewrite PTrie.map_get.
+          rewrite NO_PHI.
+          simpl.
+          reflexivity.
+        }
+        {
+          intros prev' Hsucc.
+          apply UNIQ.
+          apply preserves_succ; auto.
+        }
+      }
+    }
+    {
+      induction H.
+      {
+        inversion HEADER.
+        apply bb_header.
+        apply block_header.
+        {
+          apply (eq_cfg_reach f (propagate_store_to_load f) 
+            preserves_entry preserves_succ); auto.
+        }
+        {
+          intros term Hsucc.
+          apply preserves_succ in Hsucc.
+          apply TERM in Hsucc.
+          apply preserves_term; auto.
+        }
+        {
+          intros contra.
+          destruct ((fn_insts (propagate_store_to_load f)) ! header) eqn:Eheader; 
+            try contradiction.
+          unfold propagate_store_to_load in Eheader. 
+          unfold rewrite_insts in Eheader.
+          simpl in Eheader.
+          rewrite PTrie.map_get in Eheader.
+          rewrite contra in Eheader.
+          simpl in Eheader.
+          inversion Eheader.
+        }
+      }
+      {
+        apply bb_elem with (prev := prev); auto.
+        { apply preserves_succ; auto. }
+        { intros contra. apply preserves_term in contra. contradiction. }
+        {
+          intros contra.
+          destruct ((fn_insts (propagate_store_to_load f)) ! elem) eqn:Eheader; 
+            try contradiction.
+          unfold propagate_store_to_load in Eheader. 
+          unfold rewrite_insts in Eheader.
+          simpl in Eheader.
+          rewrite PTrie.map_get in Eheader.
+          rewrite contra in Eheader.
+          simpl in Eheader.
+          inversion Eheader.
+        }
+        {
+          unfold propagate_store_to_load in NO_PHI.
+          unfold rewrite_phis in NO_PHI.
+          simpl in NO_PHI.
+          rewrite PTrie.map_get in NO_PHI.
+          destruct ((fn_phis f) ! elem) eqn:Ephi; try reflexivity.
+          simpl in NO_PHI.
+          inversion NO_PHI.
+        }
+        {
+          intros prev' Hsucc.
+          apply UNIQ.
+          apply preserves_succ; auto.
+        }
+      }
+    }
   Qed.
 
   Lemma preserves_defs:
@@ -432,7 +600,7 @@ Section PROPAGATE_PROPERTIES.
         simpl in INST. apply PTrie.map_in in INST.
         destruct INST as [inst [Hloc Hdef]]. subst i.
         apply defined_at_inst with (i := inst). apply Hloc.
-        unfold rewrite_inst, rewrite_inst_uses in DEFS. 
+        unfold rewrite_inst, rewrite_inst_uses in DEFS.
         destruct inst; inversion DEFS; constructor.
       }
       {
@@ -543,8 +711,8 @@ Section PROPAGATE_PROPERTIES.
         unfold rewrite_insts in INST.
         apply PTrie.map_in in INST.
         destruct INST as [i_use [Hin Hwr]].
-        generalize (propagate_inst_use_inversion 
-          f aa rs loads loads' Heqloads Heqloads' 
+        generalize (propagate_inst_use_inversion
+          f aa rs loads loads' Heqloads Heqloads'
           i_use i r Hwr USES
         ).
         intros Hinv.
@@ -672,6 +840,26 @@ Section PROPAGATE_PROPERTIES.
       generalize (Huniq def def' r).
       intros Huniqr.
       apply Huniqr. apply Hdef_def. apply Hdef_def'.
+    }
+    (* Blocks are valid *)
+    {
+      unfold blocks_are_valid.
+      intros e.
+      generalize (fn_blocks_are_valid e); intros Hblocks.
+      destruct Hblocks as [[h Hbb]|Hnone].
+      {
+        left.
+        apply preserves_blocks in Hbb. rewrite <- Heqf' in Hbb.
+        exists h; auto.
+      }
+      {
+        right.
+        subst f'.
+        unfold propagate_store_to_load; unfold rewrite_insts; simpl.
+        rewrite PTrie.map_get.
+        rewrite Hnone.
+        simpl; auto.
+      }
     }
   Qed.
 End PROPAGATE_PROPERTIES.

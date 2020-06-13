@@ -5,10 +5,10 @@
 Require Import Coq.ZArith.ZArith.
 Require Import Coq.Lists.List.
 
-Require Import LLIR.State.
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 Require Import LLIR.Dom.
+Require Import LLIR.Block.
 
 Import ListNotations.
 
@@ -28,9 +28,14 @@ Section VALIDITY.
       DefinedAt f def' r ->
       def' = def.
 
+  Definition blocks_are_valid :=
+    forall (e: node),
+      (exists (h: node), BasicBlock f h e) \/ (f.(fn_insts) ! e = None).
+
   Record is_valid : Prop :=
     { fn_uses_have_defs: uses_have_defs
     ; fn_defs_are_unique: defs_are_unique
+    ; fn_blocks_are_valid: blocks_are_valid
     }.
 
   Theorem defs_dominate_uses:
@@ -41,7 +46,7 @@ Section VALIDITY.
       Dominates f def use.
   Proof.
     intros Hvalid def use r.
-    destruct Hvalid as [Huses_have_defs Hdefs_are_unique].
+    destruct Hvalid as [Huses_have_defs Hdefs_are_unique _].
     intros Hdef.
     intros Huse.
     unfold uses_have_defs in Huses_have_defs.

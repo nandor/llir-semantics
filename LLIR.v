@@ -6,7 +6,6 @@ Require Import Coq.ZArith.ZArith.
 Require Import Coq.Lists.List.
 
 Require Import LLIR.Maps.
-Require Import LLIR.State.
 Require Export LLIR.Values.
 
 Import ListNotations.

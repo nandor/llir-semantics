@@ -6,11 +6,9 @@ Require Import Coq.Lists.List.
 Require Import Coq.ZArith.ZArith.
 Require Import Coq.Init.Nat.
 
-Require Import LLIR.State.
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 Require Import LLIR.Typing.
-Require Import LLIR.Dom.
 
 Import ListNotations.
 
@@ -128,13 +126,3 @@ Definition step (p: prog) (st: state): option state :=
     end
   | _ => None
   end.
-
-Theorem evaluate_bb:
-  forall (p: prog) (st: state) (h: node) (n: node)
-    (fr: frame) (frs: list frame) (f: func),
-    well_typed_prog p ->
-    Some f = p ! (fr.(fr_func)) ->
-    f.(fn_insts) ! (fr.(fr_pc)) <> None ->
-    BasicBlock f h n ->
-    False.
-Admitted.

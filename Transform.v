@@ -6,7 +6,6 @@ Require Import Coq.PArith.PArith.
 Require Import Coq.Lists.List.
 
 Require Import LLIR.Maps.
-Require Import LLIR.State.
 Require Import LLIR.Aliasing.
 Require Import LLIR.LLIR.
 

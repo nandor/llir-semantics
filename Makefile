@@ -19,6 +19,7 @@ PROOFS=\
 	Closure.vo\
 	Transform.vo\
 	Dom.vo\
+	Block.vo\
 	Eval.vo\
 	Aliasing.vo\
 	Typing.vo\
