@@ -16,16 +16,21 @@ Import ListNotations.
 
 Record atom := mkdata
   { dt_size: positive
-  ; dt_data: PTrie.t qword
+  ; dt_data: PTrie.t quad
   }.
 
 Record frame := mkframe
   { fr_data: PTrie.t atom
   ; fr_regs: PTrie.t value
   ; fr_args: PTrie.t value
-  ; fr_func: name
+  ; fr_func: name 
   ; fr_pc: node
   ; fr_retaddr: node
+  ; fr_retframe: node
+  }.
+
+Record stack :=
+  {
   }.
 
 Record state :=
@@ -33,11 +38,7 @@ Record state :=
   }.
 
 
-Definition trace := list (positive * list qword).
-
-Axiom step_binop: binop -> ty -> value -> value -> option value.
-
-Axiom step_unop: unop -> ty -> value -> option value.
+Definition trace := list (positive * list value).
 
 Axiom get_vreg: frame -> reg -> value.
 
@@ -45,7 +46,12 @@ Axiom set_vreg: frame -> reg -> value -> frame.
 
 Axiom set_pc: frame -> node -> frame.
 
-Axiom is_true: value -> option bool.
+Axiom set_vreg_pc: frame -> reg -> value -> node -> frame.
+
+
+Axiom step_binop: binop -> ty -> value -> value -> option value.
+
+Axiom step_unop: unop -> ty -> value -> option value.
 
 Axiom argext: ty -> value -> option value.
 
@@ -63,13 +69,13 @@ Definition step_inst
       match argext ty v with
       | None => None
       | Some v' =>
-        let fr' := set_pc (set_vreg fr dst v') next in
+        let fr' := set_vreg_pc fr dst v' next in
         Some {| st_stack := fr' :: frs |}
       end
     end
 
   | LLInt32 dst next val =>
-    let fr' := set_pc (set_vreg fr dst (Val32 val)) next in
+    let fr' := set_vreg_pc fr dst (V32 val) next in
     Some {| st_stack := fr' :: frs |}
 
   | LLUnop (ty, dst) next op arg =>
@@ -77,7 +83,7 @@ Definition step_inst
     match step_unop op ty varg with
     | None => None
     | Some r =>
-      let fr' := set_pc (set_vreg fr dst r) next in
+      let fr' := set_vreg_pc fr dst r next in
       Some {| st_stack := fr' :: frs |}
     end
 
@@ -87,17 +93,16 @@ Definition step_inst
     match step_binop op ty vl vr with
     | None => None
     | Some r =>
-      let fr' := set_pc (set_vreg fr dst r) next in
+      let fr' := set_vreg_pc fr dst r next in
       Some {| st_stack := fr' :: frs |}
     end
 
   | LLJcc cond bt bf =>
     let vc := get_vreg fr cond in
     match is_true vc with
-    | None => None
-    | Some true =>
+    | true =>
       Some {| st_stack := set_pc fr bt :: frs |}
-    | Some false =>
+    | false =>
       Some {| st_stack := set_pc fr bf :: frs |}
     end
 

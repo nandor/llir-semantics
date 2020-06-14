@@ -409,6 +409,54 @@ Proof.
   intros i. split; intros H; destruct i; try inversion H; constructor.
 Qed.
 
+Definition is_exit (i: inst): bool :=
+  match i with
+  | LLLd _ _ _ => false
+  | LLArg _ _ _ => false
+  | LLInt8 _ _ _ => false
+  | LLInt16 _ _ _ => false
+  | LLInt32 _ _ _ => false
+  | LLInt64 _ _ _ => false
+  | LLMov _ _ _ => false
+  | LLFrame _ _ _ _ => false
+  | LLGlobal _ _ _ _ => false
+  | LLUndef _ _ => false
+  | LLUnop _ _ _ _ => false
+  | LLBinop _ _ _ _ _ => false
+  | LLSelect _ _ _ _ _ => false
+  | LLSyscall _ _ _ _ => false
+  | LLCall _ _ _ _ => false
+  | LLInvoke _ _ _ _ _ => false
+  | LLTCall _ _ => true
+  | LLTInvoke _ _ _ => false
+  | LLSt next _ _ => false
+  | LLRet _ => true
+  | LLJcc _ _ _ => false
+  | LLJmp _ => false
+  | LLTrap => true
+  end.
+
+Inductive Exit: inst -> Prop :=
+  | exit_ret:
+    forall (ret: option reg),
+      Exit (LLRet ret)
+  | exit_trap:
+    Exit LLTrap
+  | exit_tcall:
+    forall (callee: reg) (args: list reg),
+      Exit (LLTCall callee args)
+  .
+
+Lemma is_exit_exit:
+  forall (i: inst),
+    is_exit i = true <-> Exit i.
+Proof.
+  intros i.
+  split; intros H.
+  + destruct i; simpl in H; inversion H; constructor.
+  + inversion H; simpl; reflexivity.
+Qed.
+
 Section FUNCTION.
   Variable f: func.
 
@@ -452,6 +500,24 @@ Section FUNCTION.
         (INST: Some i = f.(fn_insts) ! n)
         (TERM: Terminator i),
         TermAt n.
+
+  Inductive ExitAt: node -> Prop :=
+    | exit_at:
+      forall (i: inst) (n: node)
+        (INST: Some i = f.(fn_insts) ! n)
+        (EXIT: Exit i),
+        ExitAt n.  
+
+  Theorem exit_no_succ:
+    forall (n: node),
+      ExitAt n -> ~exists (m: node), SuccOf n m.
+  Proof.
+    intros n Hexit contra; destruct contra as [m Hsucc].
+    inversion Hexit.
+    inversion Hsucc.
+    rewrite <- INST in HN; inversion HN; subst.
+    inversion EXIT; subst; inversion SUCC; subst.
+  Qed.
 End FUNCTION.
 
 Definition get_successors (i: inst) :=

@@ -8,3 +8,5 @@ Runtime.v
 *.llbc
 *.llir
 test/*.v
+*.exe
+
