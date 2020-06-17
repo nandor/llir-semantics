@@ -13,99 +13,169 @@ Notation node := positive.
 Notation reg := positive.
 
 
+Module INT.
+  Module Type VALUE.
+    Parameter t: Type.
+    Parameter is_zero: t -> bool.
+    Parameter zero: t.
+    Parameter eq_dec: forall (x: t) (y: t), {x = y} + {x <> y}.
+    Parameter zero_is_zero: is_zero zero = true.
+    Parameter non_zero_is_not_zero: forall (x: t), x <> zero -> is_zero x = false.
+  End VALUE.
 
-Inductive bit : Type :=
-  | I
-  | O
-  .
+  Module DOUBLE (BASE : VALUE).
+    Definition t := (BASE.t * BASE.t)%type.
 
-Module Type VALUE.
-  Parameter t: Type.
+    Definition is_zero v :=
+      match v with
+      | (lo, hi) => BASE.is_zero lo && BASE.is_zero hi
+      end.
 
-  Parameter is_zero: t -> bool.
+    Definition zero: t := (BASE.zero, BASE.zero).
 
-  Parameter zero: t.
+    Lemma eq_dec: forall (x: t) (y: t), {x = y} + {x <> y}.
+    Proof.
+      intros x y.
+      destruct x; destruct y.
+      destruct (BASE.eq_dec t0 t2); destruct (BASE.eq_dec t1 t3); subst; auto;
+      right; intros contra; inversion contra; contradiction.
+    Qed.
 
-  Parameter eq_dec: forall (x: t) (y: t), {x = y} + {x <> y}.
+    Lemma zero_is_zero: is_zero zero = true.
+    Proof.
+      simpl; rewrite BASE.zero_is_zero; auto.
+    Qed.
 
-  Parameter zero_is_zero: is_zero zero = true.
+    Lemma non_zero_is_not_zero: forall (x: t), x <> zero -> is_zero x = false.
+    Proof.
+      intros x Hnz.
+      destruct x as [lo hi].
+      destruct (BASE.eq_dec lo BASE.zero); destruct (BASE.eq_dec hi BASE.zero);
+      unfold zero in Hnz; subst; try contradiction; simpl;
+      try rewrite <- (BASE.non_zero_is_not_zero hi);
+      try rewrite <- (BASE.non_zero_is_not_zero lo);
+      try rewrite (BASE.non_zero_is_not_zero hi);
+      try rewrite (BASE.non_zero_is_not_zero lo);
+      try rewrite BASE.zero_is_zero;
+      auto.
+    Qed.
+  End DOUBLE.
 
-  Parameter non_zero_is_not_zero: forall (x: t), x <> zero -> is_zero x = false.
-End VALUE.
+  Module I1 <: VALUE.
+    Inductive _t : Type := I | O.
 
-Module DOUBLE (BASE : VALUE).
-  Definition t := (BASE.t * BASE.t)%type.
+    Definition t := _t.
 
-  Definition is_zero v :=
+    Definition is_zero v :=
+      match v with
+      | I => false
+      | O => true
+      end.
+
+    Definition zero: t := O.
+
+    Lemma eq_dec: forall (x: t) (y: t), {x = y} + {x <> y}.
+    Proof.
+      intros x y.
+      destruct x; destruct y; auto; right; intros contra; inversion contra.
+    Qed.
+
+    Lemma zero_is_zero: is_zero zero = true.
+    Proof. reflexivity. Qed.
+
+    Lemma non_zero_is_not_zero: forall (x: t), x <> zero -> is_zero x = false.
+    Proof. intros x Hnz; destruct x; [reflexivity|contradiction]. Qed.
+  End I1.
+
+  Module I2 := DOUBLE I1.
+  Module I4 := DOUBLE I2.
+  Module I8 := DOUBLE I4.
+  Module I16 := DOUBLE I8.
+  Module I32 := DOUBLE I16.
+  Module I64 := DOUBLE I32.
+
+  Inductive t : Type :=
+    | Int8 (v: I8.t)
+    | Int16 (v: I16.t)
+    | Int32 (v: I32.t)
+    | Int64 (v: I64.t)
+    .
+
+  Definition is_zero (v: t): bool :=
     match v with
-    | (lo, hi) => BASE.is_zero lo && BASE.is_zero hi
+    | Int8 v => I8.is_zero v
+    | Int16 v => I16.is_zero v
+    | Int32 v => I32.is_zero v
+    | Int64 v => I64.is_zero v
     end.
 
-  Definition zero: t := (BASE.zero, BASE.zero).
+  Inductive IsZero: t -> Prop :=
+    | z_int8: IsZero (Int8 I8.zero)
+    | z_int16: IsZero (Int16 I16.zero)
+    | z_int32: IsZero (Int32 I32.zero)
+    | z_int64: IsZero (Int64 I64.zero)
+    .
 
-  Lemma eq_dec: forall (x: t) (y: t), {x = y} + {x <> y}.
+  Lemma is_zero_Zero:
+    forall (v: t),
+      is_zero v = true <-> IsZero v.
   Proof.
-    intros x y.
-    destruct x; destruct y.
-    destruct (BASE.eq_dec t0 t2); destruct (BASE.eq_dec t1 t3); subst; auto;
-    right; intros contra; inversion contra; contradiction.
+    intros v.
+    split; intros H.
+    {
+      destruct v; inversion H as [H'];
+        [ destruct (I8.eq_dec v I8.zero)
+        | destruct (I16.eq_dec v I16.zero)
+        | destruct (I32.eq_dec v I32.zero)
+        | destruct (I64.eq_dec v I64.zero)
+        ]; subst; try constructor;
+        [ rewrite I8.non_zero_is_not_zero in H'
+        | rewrite I16.non_zero_is_not_zero in H'
+        | rewrite I32.non_zero_is_not_zero in H'
+        | rewrite I64.non_zero_is_not_zero in H'
+        ]; auto; inversion H'.
+    }
+    {
+      inversion H; subst; simpl; reflexivity.
+    }
   Qed.
 
-  Lemma zero_is_zero: is_zero zero = true.
+  Inductive IsNonZero: t -> Prop :=
+    | nz_int8:  forall (v: I8.t)  (NZ: v <> I8.zero),  IsNonZero (Int8 v)
+    | nz_int16: forall (v: I16.t) (NZ: v <> I16.zero), IsNonZero (Int16 v)
+    | nz_int32: forall (v: I32.t) (NZ: v <> I32.zero), IsNonZero (Int32 v)
+    | nz_int64: forall (v: I64.t) (NZ: v <> I64.zero), IsNonZero (Int64 v)
+    .
+
+  Lemma is_zero_NonZero:
+    forall (v: t),
+      is_zero v = false <-> IsNonZero v.
   Proof.
-    simpl; rewrite BASE.zero_is_zero; auto.
+    intros v.
+    split; intros H.
+    {
+      destruct v; try constructor; inversion H as [H']; clear H;
+      intros contra; subst; simpl in H'; inversion H'.
+    }
+    {
+      inversion H; subst; clear H; auto; simpl;
+        [ rewrite I8.non_zero_is_not_zero
+        | rewrite I16.non_zero_is_not_zero
+        | rewrite I32.non_zero_is_not_zero
+        | rewrite I64.non_zero_is_not_zero
+        ]; auto.
+    }
   Qed.
 
-  Lemma non_zero_is_not_zero: forall (x: t), x <> zero -> is_zero x = false.
+  Lemma zero_dec: forall (v: t), IsNonZero v \/ IsZero v.
   Proof.
-    intros x Hnz.
-    destruct x as [lo hi].
-    destruct (BASE.eq_dec lo BASE.zero); destruct (BASE.eq_dec hi BASE.zero);
-    unfold zero in Hnz; subst; try contradiction; simpl;
-    try rewrite <- (BASE.non_zero_is_not_zero hi);
-    try rewrite <- (BASE.non_zero_is_not_zero lo);
-    try rewrite (BASE.non_zero_is_not_zero hi);
-    try rewrite (BASE.non_zero_is_not_zero lo);
-    try rewrite BASE.zero_is_zero; 
-    auto.
+    intros v; destruct v.
+    - destruct (I8.eq_dec  v I8.zero);  [right; subst|left]; constructor; auto.
+    - destruct (I16.eq_dec v I16.zero); [right; subst|left]; constructor; auto.
+    - destruct (I32.eq_dec v I32.zero); [right; subst|left]; constructor; auto.
+    - destruct (I64.eq_dec v I64.zero); [right; subst|left]; constructor; auto.
   Qed.
-End DOUBLE.
-
-Module INT1 <: VALUE.
-  Definition t := bit.
-
-  Definition is_zero v :=
-    match v with
-    | I => false
-    | O => true
-    end.
-
-  Definition zero: t := O.
-
-  Lemma eq_dec: forall (x: t) (y: t), {x = y} + {x <> y}.
-  Proof.
-    intros x y.
-    destruct x; destruct y; auto; right; intros contra; inversion contra.
-  Qed.
-
-  Lemma zero_is_zero: is_zero zero = true.
-  Proof. reflexivity. Qed.
-
-  Lemma non_zero_is_not_zero: forall (x: t), x <> zero -> is_zero x = false.
-  Proof. intros x Hnz; destruct x; [reflexivity|contradiction]. Qed.
-End INT1.
-
-Module INT2 := DOUBLE INT1.
-
-Module INT4 := DOUBLE INT2.
-
-Module INT8 := DOUBLE INT4.
-
-Module INT16 := DOUBLE INT8.
-
-Module INT32 := DOUBLE INT16.
-
-Module INT64 := DOUBLE INT32.
+End INT.
 
 Inductive sym : Type :=
   (* Pointer to the program arguments. *)
@@ -119,35 +189,26 @@ Inductive sym : Type :=
   .
 
 Inductive value : Type :=
-  | V8 (v: INT8.t)
-  | V16 (v: INT16.t)
-  | V32 (v: INT32.t)
-  | V64 (v: INT64.t)
+  | VInt (v: INT.t)
   | VSym (v: sym)
   | VUnd
   .
 
 Inductive quad : Type :=
-  | QVal (v: INT64.t)
+  | QVal (v: INT.I64.t)
   | QSym (v: sym)
   | QUnd
   .
 
 Definition is_true (v: value): bool :=
   match v with
-  | V8 v => negb (INT8.is_zero v)
-  | V16 v => negb (INT16.is_zero v)
-  | V32 v => negb (INT32.is_zero v)
-  | V64 v => negb (INT64.is_zero v)
+  | VInt v => negb (INT.is_zero v)
   | VSym _ => true
   | VUnd => false
   end.
 
 Inductive IsTrue: value -> Prop :=
-  | is_true_v8:  forall (v: INT8.t)  (NZ: v <> INT8.zero),  IsTrue (V8 v)
-  | is_true_v16: forall (v: INT16.t) (NZ: v <> INT16.zero), IsTrue (V16 v)
-  | is_true_v32: forall (v: INT32.t) (NZ: v <> INT32.zero), IsTrue (V32 v)
-  | is_true_v64: forall (v: INT64.t) (NZ: v <> INT64.zero), IsTrue (V64 v)
+  | is_true_int: forall (v: INT.t) (NZ: INT.IsNonZero v), IsTrue (VInt v)
   | is_true_sym: forall (s: sym), IsTrue (VSym s)
   .
 
@@ -158,24 +219,20 @@ Proof.
   intros v.
   split; intros H.
   {
-    destruct v; try constructor; inversion H as [H']; clear H;
-    intros contra; subst; simpl in H'; inversion H'.
+    destruct v.
+    - constructor; apply INT.is_zero_NonZero; simpl in H.
+      destruct (INT.is_zero v) eqn:Ez; simpl in H; auto.
+    - constructor.
+    - inversion H.
   }
   {
-    inversion H; subst; clear H; auto; simpl;
-      [ rewrite INT8.non_zero_is_not_zero
-      | rewrite INT16.non_zero_is_not_zero
-      | rewrite INT32.non_zero_is_not_zero
-      | rewrite INT64.non_zero_is_not_zero
-      ]; auto.
+    inversion H; subst; clear H; auto; simpl.
+    apply INT.is_zero_NonZero in NZ; rewrite NZ; auto.
   }
 Qed.
 
 Inductive IsFalse: value -> Prop :=
-  | is_false_v8:  IsFalse (V8  INT8.zero)
-  | is_false_v16: IsFalse (V16 INT16.zero)
-  | is_false_v32: IsFalse (V32 INT32.zero)
-  | is_false_v64: IsFalse (V64 INT64.zero)
+  | is_false_int: forall (v: INT.t) (Z: INT.IsZero v), IsFalse (VInt v)
   | is_false_und: IsFalse VUnd
   .
 
@@ -186,19 +243,22 @@ Proof.
   intros v.
   split; intros H.
   {
-    destruct v; try constructor; inversion H as [H'];
-      [ destruct (INT8.eq_dec v INT8.zero)
-      | destruct (INT16.eq_dec v INT16.zero)
-      | destruct (INT32.eq_dec v INT32.zero)
-      | destruct (INT64.eq_dec v INT64.zero)
-      ]; subst; try constructor;
-      [ rewrite INT8.non_zero_is_not_zero in H'
-      | rewrite INT16.non_zero_is_not_zero in H'
-      | rewrite INT32.non_zero_is_not_zero in H'
-      | rewrite INT64.non_zero_is_not_zero in H'
-      ]; auto; inversion H'.
+    destruct v.
+    - constructor; apply INT.is_zero_Zero; simpl in H.
+      destruct (INT.is_zero v) eqn:Ez; simpl in H; auto.
+    - inversion H.
+    - constructor.
   }
   {
-    inversion H; subst; simpl; reflexivity.
+    inversion H; subst; clear H; auto; simpl.
+    apply INT.is_zero_Zero in Z; rewrite Z; auto.
   }
+Qed.
+
+Lemma value_tf_dec: forall (v: value), IsTrue v \/ IsFalse v.
+Proof.
+  intros v; destruct v.
+  - destruct (INT.zero_dec v); [left|right]; constructor; auto.
+  - left; constructor.
+  - right; constructor.
 Qed.

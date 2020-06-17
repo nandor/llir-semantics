@@ -16,7 +16,7 @@ Definition ptr_ty := TInt I64.
 Definition syscall_ty := TInt I64.
 
 (* Returns the register defined by an instruction and its type. *)
-Definition get_inst_def (i: inst): option (ty * reg) :=
+Definition get_inst_ty_def (i: inst): option (ty * reg) :=
   match i with
   | LLSyscall dst _ _ _ => Some (syscall_ty, dst)
   | LLCall dst _ _ _ => dst
@@ -32,7 +32,8 @@ Definition get_inst_def (i: inst): option (ty * reg) :=
   | LLMov dst _ _ => Some dst
 
   | LLFrame dst _ _ _ => Some (ptr_ty, dst)
-  | LLGlobal dst _ _ _ => Some (ptr_ty, dst)
+  | LLGlobal dst _ _ _ _ => Some (ptr_ty, dst)
+  | LLFunc dst _ _ => Some (ptr_ty, dst)
 
   | LLLd dst _ _ => Some dst
   | LLUndef dst _ => Some dst
@@ -51,7 +52,7 @@ Definition get_inst_def (i: inst): option (ty * reg) :=
 Definition ty_env_inst (insts: inst_map): type_env :=
   PTrie.fold
     (fun env _ i =>
-      match get_inst_def i with
+      match get_inst_ty_def i with
       | Some (ty, dst) => PTrie.set env dst ty
       | None => env
       end)
@@ -126,27 +127,29 @@ Inductive well_typed_inst: type_env -> inst -> Prop :=
       (DST_TY: well_typed_reg env dst t),
       well_typed_inst env (LLLd (t, dst) next addr)
   | type_frame:
-    forall (env: type_env) (dst:reg) (next: node) (object: positive) (offset: nat)
+    forall (env: type_env) (dst:reg) (next: node)
+      (object: positive) (offset: nat)
       (DST_TY: well_typed_reg env dst ptr_ty),
       well_typed_inst env (LLFrame dst next object offset)
   | type_global:
-    forall (env: type_env) (dst: reg) (next: node) (object: positive) (offset: nat)
+    forall (env: type_env) (dst: reg) (next: node)
+      (segment: positive) (object: positive) (offset: nat)
       (DST_TY: well_typed_reg env dst ptr_ty),
-      well_typed_inst env (LLGlobal dst next object offset)
+      well_typed_inst env (LLGlobal dst next segment object offset)
   | type_int8:
-    forall (env: type_env) (dst: reg) (next: node) (val: INT8.t)
+    forall (env: type_env) (dst: reg) (next: node) (val: INT.I8.t)
       (DST_TY: well_typed_reg env dst (TInt I8)),
       well_typed_inst env (LLInt8 dst next val)
   | type_int16:
-    forall (env: type_env) (dst: reg) (next: node) (val: INT16.t)
+    forall (env: type_env) (dst: reg) (next: node) (val: INT.I16.t)
       (DST_TY: well_typed_reg env dst (TInt I16)),
       well_typed_inst env (LLInt16 dst next val)
   | type_int32:
-    forall (env: type_env) (dst: reg) (next: node) (val: INT32.t)
+    forall (env: type_env) (dst: reg) (next: node) (val: INT.I32.t)
       (DST_TY: well_typed_reg env dst (TInt I32)),
       well_typed_inst env (LLInt32 dst next val)
   | type_int64:
-    forall (env: type_env) (dst: reg) (next: node) (val: INT64.t)
+    forall (env: type_env) (dst: reg) (next: node) (val: INT.I64.t)
       (DST_TY: well_typed_reg env dst (TInt I64)),
       well_typed_inst env (LLInt64 dst next val)
   | type_arg:

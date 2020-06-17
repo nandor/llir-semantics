@@ -22,7 +22,8 @@ Definition rewrite_inst_uses (i: inst) (f: reg -> reg): inst :=
   | LLJmp _ => i
   | LLUndef _ _ => i
   | LLFrame _ _ _ _ => i
-  | LLGlobal _ _ _ _ => i
+  | LLGlobal _ _ _ _ _ => i
+  | LLFunc _ _ _ => i
   | LLMov dst next src =>
     LLMov dst next (f src)
   | LLLd dst next addr =>

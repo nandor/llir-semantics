@@ -9,38 +9,88 @@ Require Import Coq.Init.Nat.
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 Require Import LLIR.Typing.
+Require Import LLIR.Liveness.
+Require Import LLIR.Dom.
 
 Import ListNotations.
 
 
 
-Record atom := mkdata
+Record object := mkdata
   { dt_size: positive
+  ; dt_align: positive
   ; dt_data: PTrie.t quad
   }.
 
+Definition objects := PTrie.t object.
+
 Record frame := mkframe
-  { fr_data: PTrie.t atom
+  { fr_data: objects
   ; fr_regs: PTrie.t value
   ; fr_args: PTrie.t value
-  ; fr_func: name 
+  ; fr_func: name
   ; fr_pc: node
-  ; fr_retaddr: node
-  ; fr_retframe: node
   }.
 
-Record stack :=
+Record stack := mkstack
+  { stk_fr: positive
+  ; stk_frs: list positive
+  ; stk_frames: PTrie.t frame
+  ; stk_init: objects
+  }.
+
+Record heap := mkheap
   {
   }.
 
-Record state :=
-  { st_stack: list frame
+Record state := mkstate
+  { st_stack: stack
+  ; st_heap: heap
   }.
 
 
 Definition trace := list (positive * list value).
 
-Axiom get_vreg: frame -> reg -> value.
+Section VALIDITY.
+  Variable p: prog.
+
+  Inductive ValidFrame: positive -> PTrie.t frame -> Prop :=
+    | valid_frame:
+      forall
+        (fr_id: positive) (frames: PTrie.t frame)
+        (data: objects) (args: PTrie.t value)
+        (f: func) (i: inst) (fr: frame)
+        (FRAME: Some fr = frames ! fr_id)
+        (FUNC: Some f = p ! (fr.(fr_func)))
+        (REACH: Reachable f (fr.(fr_pc)))
+        (INST: Some i = f.(fn_insts) ! (fr.(fr_pc)))
+        (REGS: forall (r: reg), LiveAt f r (fr.(fr_pc)) -> exists (v: value), Some v = fr.(fr_regs) ! r),
+        ValidFrame fr_id frames
+    .
+
+  Inductive ValidState: state -> Prop :=
+    | valid_state:
+      forall
+        (fr_id: positive) (frs: list positive) (frames: PTrie.t frame) (init: objects)
+        (h: heap)
+        (FR: ValidFrame fr_id frames)
+        (FRS: forall (f: positive), In f frs -> ValidFrame f frames),
+        ValidState (mkstate (mkstack fr_id frs frames init) h)
+    .
+End VALIDITY.
+
+Definition set_frame (st: state) (fr: frame): state :=
+  let stk := st.(st_stack) in
+  {| st_stack :=
+    {| stk_fr := stk.(stk_fr)
+     ; stk_frs := stk.(stk_frs)
+     ; stk_frames := PTrie.set stk.(stk_frames) stk.(stk_fr) fr
+     ; stk_init := stk.(stk_init)
+     |}
+   ; st_heap := st.(st_heap)
+   |}.
+
+Axiom get_vreg: frame -> reg -> option value.
 
 Axiom set_vreg: frame -> reg -> value -> frame.
 
@@ -48,19 +98,13 @@ Axiom set_pc: frame -> node -> frame.
 
 Axiom set_vreg_pc: frame -> reg -> value -> node -> frame.
 
-
 Axiom step_binop: binop -> ty -> value -> value -> option value.
 
 Axiom step_unop: unop -> ty -> value -> option value.
 
 Axiom argext: ty -> value -> option value.
 
-Definition step_inst
-  (f: func)
-  (fr: frame)
-  (frs: list frame)
-  (i: inst): option state :=
-
+Definition step_inst (fr: frame) (st: state) (i: inst): option state :=
   match i with
   | LLArg (ty, dst) next idx =>
     match (fr.(fr_args) ! (Pos.of_nat idx)) with
@@ -70,44 +114,56 @@ Definition step_inst
       | None => None
       | Some v' =>
         let fr' := set_vreg_pc fr dst v' next in
-        Some {| st_stack := fr' :: frs |}
+        Some (set_frame st fr')
       end
     end
 
   | LLInt32 dst next val =>
-    let fr' := set_vreg_pc fr dst (V32 val) next in
-    Some {| st_stack := fr' :: frs |}
+    let fr' := set_vreg_pc fr dst (VInt (INT.Int32 val)) next in
+    Some (set_frame st fr')
 
   | LLUnop (ty, dst) next op arg =>
-    let varg := get_vreg fr arg in
-    match step_unop op ty varg with
+    match get_vreg fr arg with
+    | Some varg =>
+      match step_unop op ty varg with
+      | Some r =>
+        let fr' := set_vreg_pc fr dst r next in
+        Some (set_frame st fr')
+      | None => None
+      end
     | None => None
-    | Some r =>
-      let fr' := set_vreg_pc fr dst r next in
-      Some {| st_stack := fr' :: frs |}
     end
 
   | LLBinop (ty, dst) next op lhs rhs =>
-    let vl := get_vreg fr lhs in
-    let vr := get_vreg fr rhs in
-    match step_binop op ty vl vr with
+    match get_vreg fr lhs with
+    | Some vl =>
+      match get_vreg fr rhs with
+      | Some vr =>
+        match step_binop op ty vl vr with
+        | None => None
+        | Some r =>
+          let fr' := set_vreg_pc fr dst r next in
+          Some (set_frame st fr')
+        end
+      | None => None
+      end
     | None => None
-    | Some r =>
-      let fr' := set_vreg_pc fr dst r next in
-      Some {| st_stack := fr' :: frs |}
     end
 
   | LLJcc cond bt bf =>
-    let vc := get_vreg fr cond in
-    match is_true vc with
-    | true =>
-      Some {| st_stack := set_pc fr bt :: frs |}
-    | false =>
-      Some {| st_stack := set_pc fr bf :: frs |}
+    match get_vreg fr cond with
+    | Some vc =>
+      match is_true vc with
+      | true =>
+        Some (set_frame st (set_pc fr bt))
+      | false =>
+        Some (set_frame st (set_pc fr bf))
+      end
+    | None => None
     end
 
   | LLJmp target =>
-    Some {| st_stack := set_pc fr target :: frs |}
+    Some (set_frame st (set_pc fr target))
 
   | LLRet val =>
     None
@@ -117,13 +173,13 @@ Definition step_inst
   end.
 
 Definition step (p: prog) (st: state): option state :=
-  match st.(st_stack) with
-  | fr :: frs =>
+  match (st.(st_stack).(stk_frames)) ! (st.(st_stack).(stk_fr)) with
+  | Some fr =>
     match p ! (fr.(fr_func)) with
     | Some fn =>
       match fn.(fn_insts) ! (fr.(fr_pc)) with
       | Some inst =>
-        step_inst fn fr frs inst
+        step_inst fr st inst
       | None =>
         None
       end

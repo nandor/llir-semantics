@@ -13,7 +13,7 @@ Import ListNotations.
 
 
 Record object := mkobject
-  { obj_size : positive
+  { obj_sizre : positive
   ; obj_align: positive
   }.
 
@@ -68,14 +68,15 @@ Inductive binop : Type :=
 Inductive inst : Type :=
   | LLLd (dst: (ty * reg)) (next: node) (addr: reg)
   | LLArg (dst: (ty * reg)) (next: node) (index: nat)
-  | LLInt8 (dst: reg) (next: node) (value: INT8.t)
-  | LLInt16 (dst: reg) (next: node) (value: INT16.t)
-  | LLInt32 (dst: reg) (next: node) (value: INT32.t)
-  | LLInt64 (dst: reg) (next: node) (value: INT64.t)
+  | LLInt8 (dst: reg) (next: node) (value: INT.I8.t)
+  | LLInt16 (dst: reg) (next: node) (value: INT.I16.t)
+  | LLInt32 (dst: reg) (next: node) (value: INT.I32.t)
+  | LLInt64 (dst: reg) (next: node) (value: INT.I64.t)
   | LLMov (dst: (ty * reg)) (next: node) (src: reg)
   | LLSelect (dst: (ty * reg)) (next: node) (cond: reg) (vt: reg) (vf: reg)
   | LLFrame (dst: reg) (next: node) (object: positive) (offset: nat)
-  | LLGlobal (dst: reg) (next: node) (object: positive) (offset: nat)
+  | LLGlobal (dst: reg) (next: node) (segment: positive) (object: positive) (offset: nat)
+  | LLFunc (dst: reg) (next: node) (func: name)
   | LLUndef (dst: (ty * reg)) (next: node)
   | LLUnop (dst: (ty * reg)) (next: node) (op: unop) (arg: reg)
   | LLBinop (dst: (ty * reg)) (next: node) (op: binop) (lhs: reg) (rhs: reg)
@@ -117,16 +118,16 @@ Inductive InstDefs: inst -> reg -> Prop :=
     forall (t: ty) (dst: reg) (next: node) (index: nat),
       InstDefs (LLArg (t, dst) next index) dst
   | defs_int8:
-    forall (dst: reg) (next: node) (value: INT8.t),
+    forall (dst: reg) (next: node) (value: INT.I8.t),
       InstDefs (LLInt8 dst next value) dst
   | defs_int16:
-    forall (dst: reg) (next: node) (value: INT16.t),
+    forall (dst: reg) (next: node) (value: INT.I16.t),
       InstDefs (LLInt16 dst next value) dst
   | defs_int32:
-    forall (dst: reg) (next: node) (value: INT32.t),
+    forall (dst: reg) (next: node) (value: INT.I32.t),
       InstDefs (LLInt32 dst next value) dst
   | defs_int64:
-    forall (dst: reg) (next: node) (value: INT64.t),
+    forall (dst: reg) (next: node) (value: INT.I64.t),
       InstDefs (LLInt64 dst next value) dst
   | defs_mov:
     forall (t: ty) (dst: reg) (next: node) (src: reg),
@@ -138,8 +139,11 @@ Inductive InstDefs: inst -> reg -> Prop :=
     forall (dst: reg) (next: node) (object: positive) (offset: nat),
       InstDefs (LLFrame dst next object offset) dst
   | defs_global:
-    forall (dst: reg) (next: node) (object: positive) (offset: nat),
-      InstDefs (LLGlobal dst next object offset) dst
+    forall (dst: reg) (next: node) (segment: positive) (object: positive) (offset: nat),
+      InstDefs (LLGlobal dst next segment object offset) dst
+  | defs_func:
+    forall (dst: reg) (next: node) (id: name),
+      InstDefs (LLFunc dst next id) dst
   | defs_undef:
     forall (t: ty) (dst: reg) (next: node),
       InstDefs (LLUndef (t, dst) next) dst
@@ -159,6 +163,57 @@ Inductive InstDefs: inst -> reg -> Prop :=
     forall (t: ty) (dst: reg) (next: node) (callee: reg) (args: list reg) (exn: node),
       InstDefs (LLInvoke (Some (t, dst)) next callee args exn) dst
   .
+
+Definition get_inst_def (i: inst): option reg :=
+  match i with
+  | LLSyscall dst _ _ _ => Some dst
+  | LLCall (Some (_, dst)) _ _ _ => Some dst
+  | LLCall None _ _ _ => None
+  | LLTCall _ _ => None
+  | LLInvoke (Some (_, dst)) _ _ _ _ => Some dst
+  | LLInvoke None _ _ _ _ => None
+  | LLTInvoke _ _ _ => None
+  | LLArg (_, dst) _ _ => Some dst
+  | LLMov (_, dst) _ _ => Some dst
+  | LLLd (_, dst) _ _ => Some dst
+  | LLUndef (_, dst) _ => Some dst
+  | LLUnop (_, dst) _ _ _ => Some dst
+  | LLBinop (_, dst) _ _ _ _ => Some dst
+  | LLSelect (_, dst) _ _ _ _ => Some dst
+  | LLSt _ _ _ => None
+  | LLRet _ => None
+  | LLJcc _ _ _ => None
+  | LLJmp _ => None
+  | LLTrap => None
+  | LLInt8 dst _ _ => Some dst
+  | LLInt16 dst _ _ => Some dst
+  | LLInt32 dst _ _ => Some dst
+  | LLInt64 dst _ _ => Some dst
+  | LLFrame dst _ _ _ => Some dst
+  | LLGlobal dst _ _ _ _ => Some dst
+  | LLFunc dst _ _ => Some dst
+  end.
+
+Lemma get_inst_def_defs:
+  forall (i: inst) (r: reg),
+    get_inst_def i = Some r <-> InstDefs i r.
+Proof.
+  intros i r; split; intros H.
+  {
+    destruct i;
+      try match goal with
+      | [ dst: option (ty * reg) |- _ ] => destruct dst
+      end;
+      try match goal with
+      | [ dst: ty * reg |- _ ] => destruct dst
+      end;
+      inversion H as [Hr];
+      try constructor.
+  }
+  {
+    inversion H; simpl; reflexivity.
+  }
+Qed.
 
 Inductive PhiDefs: phi -> reg -> Prop :=
   | defs_phi:
@@ -255,23 +310,26 @@ Inductive Succeeds: inst -> node -> Prop :=
     forall (dst: (ty * reg)) (next: node) (index: nat),
       Succeeds (LLArg dst next index) next
   | succ_int8:
-    forall (dst: reg) (next: node) (value: INT8.t),
+    forall (dst: reg) (next: node) (value: INT.I8.t),
       Succeeds (LLInt8 dst next value) next
   | succ_int16:
-    forall (dst: reg) (next: node) (value: INT16.t),
+    forall (dst: reg) (next: node) (value: INT.I16.t),
       Succeeds (LLInt16 dst next value) next
   | succ_int32:
-    forall (dst: reg) (next: node) (value: INT32.t),
+    forall (dst: reg) (next: node) (value: INT.I32.t),
       Succeeds (LLInt32 dst next value) next
   | succ_int64:
-    forall (dst: reg) (next: node) (value: INT64.t),
+    forall (dst: reg) (next: node) (value: INT.I64.t),
       Succeeds (LLInt64 dst next value) next
   | succ_frame:
     forall (dst: reg) (next: node) (object: positive) (offset: nat),
       Succeeds (LLFrame dst next object offset) next
   | succ_global:
-    forall (dst: reg) (next: node) (object: positive) (offset: nat),
-      Succeeds (LLGlobal dst next object offset) next
+    forall (dst: reg) (next: node) (segment: positive) (object: positive) (offset: nat),
+      Succeeds (LLGlobal dst next segment object offset) next
+  | succ_func:
+    forall (dst: reg) (next: node) (id: name),
+      Succeeds (LLFunc dst next id) next
   | succ_undef:
     forall (dst: (ty * reg)) (next: node),
       Succeeds (LLUndef dst next) next
@@ -329,7 +387,8 @@ Definition is_terminator (i: inst): bool :=
   | LLInt64 _ _ _ => false
   | LLMov _ _ _ => false
   | LLFrame _ _ _ _ => false
-  | LLGlobal _ _ _ _ => false
+  | LLFunc _ _ _ => false
+  | LLGlobal _ _ _ _ _ => false
   | LLUndef _ _ => false
   | LLUnop _ _ _ _ => false
   | LLBinop _ _ _ _ _ => false
@@ -356,7 +415,8 @@ Definition has_effect (i: inst): bool :=
   | LLInt64 _ _ _ => false
   | LLMov _ _ _ => false
   | LLFrame _ _ _ _ => false
-  | LLGlobal _ _ _ _ => false
+  | LLFunc _ _ _ => false
+  | LLGlobal _ _ _ _ _ => false
   | LLUndef _ _ => false
   | LLUnop _ _ _ _ => false
   | LLBinop _ _ _ _ _ => false
@@ -419,7 +479,8 @@ Definition is_exit (i: inst): bool :=
   | LLInt64 _ _ _ => false
   | LLMov _ _ _ => false
   | LLFrame _ _ _ _ => false
-  | LLGlobal _ _ _ _ => false
+  | LLFunc _ _ _ => false
+  | LLGlobal _ _ _ _ _ => false
   | LLUndef _ _ => false
   | LLUnop _ _ _ _ => false
   | LLBinop _ _ _ _ _ => false
@@ -460,29 +521,136 @@ Qed.
 Section FUNCTION.
   Variable f: func.
 
-  Inductive DefinedAt: node -> reg -> Prop :=
-    | defined_at_inst:
+  Inductive InstDefinedAt: node -> reg -> Prop :=
+    | inst_defined_at:
       forall (n: node) (r: reg) (i: inst)
         (INST: Some i = f.(fn_insts) ! n)
         (DEFS: InstDefs i r),
-        DefinedAt n r
-    | defined_at_phi:
+        InstDefinedAt n r
+    .
+
+  Inductive PhiDefinedAt: node -> reg -> Prop :=
+    | phi_defined_at:
       forall (n: node) (r: reg) (phis: list phi)
         (PHIS: Some phis = f.(fn_phis) ! n)
         (DEFS: Exists (fun phi => PhiDefs phi r) phis),
+        PhiDefinedAt n r
+    .
+
+  Inductive DefinedAt: node -> reg -> Prop :=
+    | defined_at_inst:
+      forall (n: node) (r: reg) (DEF: InstDefinedAt n r),
         DefinedAt n r
+    | defined_at_phi:
+      forall (n: node) (r: reg) (DEF: PhiDefinedAt n r),
+        DefinedAt n r
+    .
+
+  Lemma inst_defined_at_dec:
+    forall (n: node) (r: reg),
+      {InstDefinedAt n r} + {~InstDefinedAt n r}.
+  Proof.
+    intros n r.
+    destruct ((fn_insts f) ! n) as [inst|] eqn:Einst.
+    {
+      destruct (get_inst_def inst) as [dst|] eqn:Edst.
+      {
+        destruct (Pos.eq_dec dst r) as [Eq|Ne].
+        {
+          subst r. left. apply inst_defined_at with (i := inst); auto.
+          apply get_inst_def_defs; auto.
+        }
+        {
+          right; intros contra; inversion contra.
+          rewrite Einst in INST; inversion INST; subst i.
+          apply get_inst_def_defs in DEFS.
+          rewrite Edst in DEFS; inversion DEFS.
+          contradiction.
+        }
+      }
+      {
+        right; intros contra; inversion contra. 
+        apply get_inst_def_defs in DEFS.
+        rewrite Einst in INST; inversion INST; subst i.
+        rewrite Edst in DEFS; inversion DEFS.
+      }
+    }
+    {
+      right; intros contra; inversion contra.
+      rewrite Einst in INST; inversion INST.
+    }
+  Qed.
+
+  Lemma phi_defs_dec:
+    forall (p: phi) (r: reg),
+      {PhiDefs p r} + {~PhiDefs p r}.
+  Proof.
+    intros p r. destruct p; destruct dst.
+    destruct (Pos.eq_dec p r); subst.
+    - left; constructor.
+    - right; intros contra; inversion contra; contradiction.
+  Qed.
+
+  Lemma phi_defined_at_dec:
+    forall (n: node) (r: reg),
+      {PhiDefinedAt n r} + {~PhiDefinedAt n r}.
+  Proof.
+    intros n r.
+    destruct ((fn_phis f) ! n) as [phis|] eqn:Ephis.
+    {
+      destruct (Exists_dec (fun phi => PhiDefs phi r) phis).
+      {
+        intros phi.
+        generalize (phi_defs_dec phi r); intros Hdec; destruct Hdec; auto.
+      }
+      {
+        left. apply phi_defined_at with phis; auto.
+      }
+      {
+        right; intros contra; inversion contra.
+        rewrite Ephis in PHIS; inversion PHIS; subst.
+        contradiction.
+      }
+    }
+    {
+      right; intros contra; inversion contra.
+      rewrite Ephis in PHIS; inversion PHIS.
+    }
+  Qed.
+
+  Lemma defined_at_dec:
+    forall (n: node) (r: reg),
+      {DefinedAt n r} + {~DefinedAt n r}.
+  Proof.
+    intros n r.
+    destruct (inst_defined_at_dec n r).
+    - left; apply defined_at_inst; auto.
+    - destruct (phi_defined_at_dec n r).
+      + left; apply defined_at_phi; auto.
+      + right; intros contra; inversion contra; contradiction.
+  Qed.
+
+  Inductive InstUsedAt: node -> reg -> Prop :=
+    | inst_used_at:
+      forall (n: node) (r: reg) (i: inst)
+        (INST: Some i = f.(fn_insts) ! n)
+        (USES: InstUses i r),
+        InstUsedAt n r.
+
+  Inductive PhiUsedAt: node -> reg -> Prop :=
+    | phi_used_at:
+      forall (n: node) (r: reg) (block: node) (phis: list phi)
+        (PHIS: Some phis = f.(fn_phis) ! block)
+        (USES: PhiBlockUses phis n r),
+        PhiUsedAt n r
     .
 
   Inductive UsedAt: node -> reg -> Prop :=
     | used_at_inst:
-      forall (n: node) (r: reg) (i: inst)
-        (INST: Some i = f.(fn_insts) ! n)
-        (USES: InstUses i r),
+      forall (n: node) (r: reg) (USE: InstUsedAt n r),
         UsedAt n r
     | used_at_phi:
-      forall (n: node) (r: reg) (block: node) (phis: list phi)
-        (PHIS: Some phis = f.(fn_phis) ! block)
-        (USES: PhiBlockUses phis n r),
+      forall (n: node) (r: reg) (USE: PhiUsedAt n r),
         UsedAt n r
     .
 
@@ -506,7 +674,7 @@ Section FUNCTION.
       forall (i: inst) (n: node)
         (INST: Some i = f.(fn_insts) ! n)
         (EXIT: Exit i),
-        ExitAt n.  
+        ExitAt n.
 
   Theorem exit_no_succ:
     forall (n: node),
@@ -530,7 +698,8 @@ Definition get_successors (i: inst) :=
   | LLInt64 _ next _ => [next]
   | LLMov _ next _ => [next]
   | LLFrame _ next _ _ => [next]
-  | LLGlobal _ next _ _ => [next]
+  | LLFunc _ next _ => [next]
+  | LLGlobal _ next _ _ _ => [next]
   | LLUndef _ next => [next]
   | LLUnop _ next _ _ => [next]
   | LLBinop _ next _ _ _ => [next]

@@ -20,6 +20,7 @@ PROOFS=\
 	Transform.vo\
 	Dom.vo\
 	Block.vo\
+	Liveness.vo\
 	Eval.vo\
 	Aliasing.vo\
 	Typing.vo\

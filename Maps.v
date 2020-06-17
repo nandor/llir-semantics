@@ -33,6 +33,10 @@ Module Type PARTIAL_MAP.
     forall (V: Type),
       t V -> key -> t V.
 
+  Parameter update:
+    forall (V: Type),
+      (V -> V) -> t V -> key -> t V.
+
   Parameter map:
     forall (A: Type) (B: Type),
       (key -> A -> B) -> t A -> t B.
@@ -207,6 +211,23 @@ Module PTrie <: PARTIAL_MAP.
       | xI ii => Node l o (remove r ii)
       end
     end.
+
+  Section UPDATE.
+    Variable V: Type.
+
+    Variable f: V -> V.
+
+    Fixpoint update (a: t V) (key: positive): t V :=
+      match a with
+      | Leaf => Leaf
+      | Node l o r =>
+        match key with
+        | xH => Node l (option_map f o) r
+        | xO ii => Node (update l ii) o r
+        | xI ii => Node l o (update r ii)
+        end
+      end.
+  End UPDATE.
 
   Fixpoint append (l: positive) (r: positive): positive :=
     match l with
