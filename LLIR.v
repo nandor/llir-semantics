@@ -7,6 +7,7 @@ Require Import Coq.Lists.List.
 
 Require Import LLIR.Maps.
 Require Export LLIR.Values.
+Require Import LLIR.Type.
 
 Import ListNotations.
 
@@ -16,25 +17,6 @@ Record object := mkobject
   { obj_sizre : positive
   ; obj_align: positive
   }.
-
-Inductive ty_int: Type :=
-  | I8
-  | I16
-  | I32
-  | I64
-  | I128
-  .
-
-Inductive ty_float: Type :=
-  | F32
-  | F64
-  | F80
-  .
-
-Inductive ty : Type :=
-  | TInt (i: ty_int)
-  | TFloat (f: ty_float)
-  .
 
 Inductive unop : Type :=
   | LLSext
@@ -68,10 +50,7 @@ Inductive binop : Type :=
 Inductive inst : Type :=
   | LLLd (dst: (ty * reg)) (next: node) (addr: reg)
   | LLArg (dst: (ty * reg)) (next: node) (index: nat)
-  | LLInt8 (dst: reg) (next: node) (value: INT.I8.t)
-  | LLInt16 (dst: reg) (next: node) (value: INT.I16.t)
-  | LLInt32 (dst: reg) (next: node) (value: INT.I32.t)
-  | LLInt64 (dst: reg) (next: node) (value: INT.I64.t)
+  | LLInt (dst: reg) (next: node) (value: INT.t)
   | LLMov (dst: (ty * reg)) (next: node) (src: reg)
   | LLSelect (dst: (ty * reg)) (next: node) (cond: reg) (vt: reg) (vf: reg)
   | LLFrame (dst: reg) (next: node) (object: positive) (offset: nat)
@@ -117,18 +96,9 @@ Inductive InstDefs: inst -> reg -> Prop :=
   | defs_arg:
     forall (t: ty) (dst: reg) (next: node) (index: nat),
       InstDefs (LLArg (t, dst) next index) dst
-  | defs_int8:
-    forall (dst: reg) (next: node) (value: INT.I8.t),
-      InstDefs (LLInt8 dst next value) dst
-  | defs_int16:
-    forall (dst: reg) (next: node) (value: INT.I16.t),
-      InstDefs (LLInt16 dst next value) dst
-  | defs_int32:
-    forall (dst: reg) (next: node) (value: INT.I32.t),
-      InstDefs (LLInt32 dst next value) dst
-  | defs_int64:
-    forall (dst: reg) (next: node) (value: INT.I64.t),
-      InstDefs (LLInt64 dst next value) dst
+  | defs_int:
+    forall (dst: reg) (next: node) (value: INT.t),
+      InstDefs (LLInt dst next value) dst
   | defs_mov:
     forall (t: ty) (dst: reg) (next: node) (src: reg),
       InstDefs (LLMov (t, dst) next src) dst
@@ -164,6 +134,40 @@ Inductive InstDefs: inst -> reg -> Prop :=
       InstDefs (LLInvoke (Some (t, dst)) next callee args exn) dst
   .
 
+
+(* Returns the register defined by an instruction and its type. *)
+Definition get_inst_ty_def (i: inst): option (ty * reg) :=
+  match i with
+  | LLSyscall dst _ _ _ => Some (syscall_ty, dst)
+  | LLCall dst _ _ _ => dst
+  | LLTCall _ _ => None
+  | LLInvoke dst _ _ _ _ => dst
+  | LLTInvoke _ _ _ => None
+
+  | LLArg dst _ _ => Some dst
+  | LLInt dst _ (INT.Int8 _) => Some (TInt I8, dst)
+  | LLInt dst _ (INT.Int16 _) => Some (TInt I16, dst)
+  | LLInt dst _ (INT.Int32 _) => Some (TInt I32, dst)
+  | LLInt dst _ (INT.Int64 _) => Some (TInt I64, dst)
+  | LLMov dst _ _ => Some dst
+
+  | LLFrame dst _ _ _ => Some (ptr_ty, dst)
+  | LLGlobal dst _ _ _ _ => Some (ptr_ty, dst)
+  | LLFunc dst _ _ => Some (ptr_ty, dst)
+
+  | LLLd dst _ _ => Some dst
+  | LLUndef dst _ => Some dst
+  | LLUnop dst _ _ _ => Some dst
+  | LLBinop dst _ _ _ _ => Some dst
+  | LLSelect dst _ _ _ _ => Some dst
+
+  | LLSt _ _ _ => None
+  | LLRet _ => None
+  | LLJcc _ _ _ => None
+  | LLJmp _ => None
+  | LLTrap => None
+  end.
+
 Definition get_inst_def (i: inst): option reg :=
   match i with
   | LLSyscall dst _ _ _ => Some dst
@@ -185,10 +189,7 @@ Definition get_inst_def (i: inst): option reg :=
   | LLJcc _ _ _ => None
   | LLJmp _ => None
   | LLTrap => None
-  | LLInt8 dst _ _ => Some dst
-  | LLInt16 dst _ _ => Some dst
-  | LLInt32 dst _ _ => Some dst
-  | LLInt64 dst _ _ => Some dst
+  | LLInt dst _ _ => Some dst
   | LLFrame dst _ _ _ => Some dst
   | LLGlobal dst _ _ _ _ => Some dst
   | LLFunc dst _ _ => Some dst
@@ -309,18 +310,9 @@ Inductive Succeeds: inst -> node -> Prop :=
   | succ_arg:
     forall (dst: (ty * reg)) (next: node) (index: nat),
       Succeeds (LLArg dst next index) next
-  | succ_int8:
-    forall (dst: reg) (next: node) (value: INT.I8.t),
-      Succeeds (LLInt8 dst next value) next
-  | succ_int16:
-    forall (dst: reg) (next: node) (value: INT.I16.t),
-      Succeeds (LLInt16 dst next value) next
-  | succ_int32:
-    forall (dst: reg) (next: node) (value: INT.I32.t),
-      Succeeds (LLInt32 dst next value) next
-  | succ_int64:
-    forall (dst: reg) (next: node) (value: INT.I64.t),
-      Succeeds (LLInt64 dst next value) next
+  | succ_int:
+    forall (dst: reg) (next: node) (value: INT.t),
+      Succeeds (LLInt dst next value) next
   | succ_frame:
     forall (dst: reg) (next: node) (object: positive) (offset: nat),
       Succeeds (LLFrame dst next object offset) next
@@ -381,10 +373,7 @@ Definition is_terminator (i: inst): bool :=
   match i with
   | LLLd _ _ _ => false
   | LLArg _ _ _ => false
-  | LLInt8 _ _ _ => false
-  | LLInt16 _ _ _ => false
-  | LLInt32 _ _ _ => false
-  | LLInt64 _ _ _ => false
+  | LLInt _ _ _ => false
   | LLMov _ _ _ => false
   | LLFrame _ _ _ _ => false
   | LLFunc _ _ _ => false
@@ -409,10 +398,7 @@ Definition has_effect (i: inst): bool :=
   match i with
   | LLLd _ _ _ => false
   | LLArg _ _ _ => false
-  | LLInt8 _ _ _ => false
-  | LLInt16 _ _ _ => false
-  | LLInt32 _ _ _ => false
-  | LLInt64 _ _ _ => false
+  | LLInt _ _ _ => false
   | LLMov _ _ _ => false
   | LLFrame _ _ _ _ => false
   | LLFunc _ _ _ => false
@@ -473,10 +459,7 @@ Definition is_exit (i: inst): bool :=
   match i with
   | LLLd _ _ _ => false
   | LLArg _ _ _ => false
-  | LLInt8 _ _ _ => false
-  | LLInt16 _ _ _ => false
-  | LLInt32 _ _ _ => false
-  | LLInt64 _ _ _ => false
+  | LLInt _ _ _ => false
   | LLMov _ _ _ => false
   | LLFrame _ _ _ _ => false
   | LLFunc _ _ _ => false
@@ -569,7 +552,7 @@ Section FUNCTION.
         }
       }
       {
-        right; intros contra; inversion contra. 
+        right; intros contra; inversion contra.
         apply get_inst_def_defs in DEFS.
         rewrite Einst in INST; inversion INST; subst i.
         rewrite Edst in DEFS; inversion DEFS.
@@ -692,10 +675,7 @@ Definition get_successors (i: inst) :=
   match i with
   | LLLd _ next _ => [next]
   | LLArg _ next _ => [next]
-  | LLInt8 _ next _ => [next]
-  | LLInt16 _ next _ => [next]
-  | LLInt32 _ next _ => [next]
-  | LLInt64 _ next _ => [next]
+  | LLInt _ next _ => [next]
   | LLMov _ next _ => [next]
   | LLFrame _ next _ _ => [next]
   | LLFunc _ next _ => [next]

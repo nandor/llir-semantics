@@ -12,6 +12,7 @@ Notation node := positive.
 
 Notation reg := positive.
 
+Inductive bit : Type := I | O.
 
 Module INT.
   Module Type VALUE.
@@ -62,9 +63,7 @@ Module INT.
   End DOUBLE.
 
   Module I1 <: VALUE.
-    Inductive _t : Type := I | O.
-
-    Definition t := _t.
+    Definition t := bit.
 
     Definition is_zero v :=
       match v with
@@ -183,20 +182,20 @@ Inductive sym : Type :=
   (* Pointer into a stack frame *)
   | SFrame (frame: positive) (object: positive) (offset: positive)
   (* Pointer to a global data item *)
-  | SAtom (object: positive) (offset: positive)
+  | SAtom (segment: positive) (object: positive) (offset: positive)
   (* Pointer to a function. *)
   | SFunc (func: name)
   .
 
 Inductive value : Type :=
   | VInt (v: INT.t)
-  | VSym (v: sym)
+  | VSym (s: sym)
   | VUnd
   .
 
 Inductive quad : Type :=
   | QVal (v: INT.I64.t)
-  | QSym (v: sym)
+  | QSym (s: sym)
   | QUnd
   .
 
@@ -210,55 +209,10 @@ Definition is_true (v: value): bool :=
 Inductive IsTrue: value -> Prop :=
   | is_true_int: forall (v: INT.t) (NZ: INT.IsNonZero v), IsTrue (VInt v)
   | is_true_sym: forall (s: sym), IsTrue (VSym s)
+  | is_true_und: IsTrue VUnd
   .
-
-Lemma is_true_True:
-  forall (v: value),
-    is_true v = true <-> IsTrue v.
-Proof.
-  intros v.
-  split; intros H.
-  {
-    destruct v.
-    - constructor; apply INT.is_zero_NonZero; simpl in H.
-      destruct (INT.is_zero v) eqn:Ez; simpl in H; auto.
-    - constructor.
-    - inversion H.
-  }
-  {
-    inversion H; subst; clear H; auto; simpl.
-    apply INT.is_zero_NonZero in NZ; rewrite NZ; auto.
-  }
-Qed.
 
 Inductive IsFalse: value -> Prop :=
   | is_false_int: forall (v: INT.t) (Z: INT.IsZero v), IsFalse (VInt v)
   | is_false_und: IsFalse VUnd
   .
-
-Lemma is_true_False:
-  forall (v: value),
-    is_true v = false <-> IsFalse v.
-Proof.
-  intros v.
-  split; intros H.
-  {
-    destruct v.
-    - constructor; apply INT.is_zero_Zero; simpl in H.
-      destruct (INT.is_zero v) eqn:Ez; simpl in H; auto.
-    - inversion H.
-    - constructor.
-  }
-  {
-    inversion H; subst; clear H; auto; simpl.
-    apply INT.is_zero_Zero in Z; rewrite Z; auto.
-  }
-Qed.
-
-Lemma value_tf_dec: forall (v: value), IsTrue v \/ IsFalse v.
-Proof.
-  intros v; destruct v.
-  - destruct (INT.zero_dec v); [left|right]; constructor; auto.
-  - left; constructor.
-  - right; constructor.
-Qed.

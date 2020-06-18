@@ -13,6 +13,7 @@ COQDEP=$(COQBIN)coqdep $(COQINCLUDES)
 PROOFS=\
 	Values.vo\
 	Maps.vo\
+	Type.vo\
 	LLIR.vo\
 	Export.vo\
 	SmallStep.vo\
@@ -41,6 +42,8 @@ test/simple.llbc: test/simple.c
 	llir-clang $^ -o $@ -O1 -static -Wl,-e=_start_c
 test/%.llbc: test/%.c
 	llir-clang -c $^ -o $@ -O1
+test/%.llir: test/%.llbc
+	llir-opt $^ -o $@ -O0
 
 # Coq build.
 all-v:

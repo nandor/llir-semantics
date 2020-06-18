@@ -58,36 +58,27 @@ Ltac phi_inversion_proof fn :=
 
 Ltac defined_at_inversion_proof fn inst_inversion phi_inversion :=
   intros n r Hdef_at;
-  inversion Hdef_at as [n' r' i INST DEFS|n' r' phi PHIS DEFS];
-  [
-    apply inst_inversion in INST;
-    repeat (destruct INST as [Hdef|INST];
-      [
-        destruct Hdef as [Hn Hsome_inst];
-        inversion Hsome_inst as [Hinst];
-        rewrite <- Hinst in DEFS;
-        inversion DEFS;
-        subst n r;
+  inversion Hdef_at as [n' r' INST Hn Hr|n' r' PHIS Hn Hr]; subst n' r';
+  [ inversion INST as [n' r' inst Hinst Hdef Ha Hb]; subst n' r';
+    apply inst_inversion in Hinst;
+    repeat (destruct Hinst as [[Hn Hsome_inst]|Hinst];
+      [ inversion Hsome_inst as [Hinst]; subst inst; inversion Hdef; subst n r;
         repeat match goal with
         | [ |- (?n = ?n /\ ?r = ?r) \/ _ ] => left; split; reflexivity
         | [ |- ?n = ?n /\ ?r = ?r ] => split; reflexivity
         | [ |- _ ] => right
         end
       |]);
-    inversion INST
-  |
-    apply phi_inversion in PHIS;
-    repeat (destruct PHIS as [Hdef|PHIS];
-      [
-        destruct Hdef as [Hn Hsome_inst];
-        inversion Hsome_inst as [Hinst]; clear Hsome_inst;
-        rewrite <- Hinst in DEFS;
-        apply Exists_exists in DEFS;
-        destruct DEFS as [phi' [Hin Hdst]];
+    inversion Hinst
+  | inversion PHIS as [n' r' phis Hphis Hblock Hn Hr]; subst n' r';
+    apply phi_inversion in Hphis;
+    repeat (destruct Hphis as [[Hn Hsome_phi]|Hphis];
+      [ inversion Hsome_phi as [Hphi]; clear Hsome_phi;
+        apply Exists_exists in Hblock;
+        destruct Hblock as [phi' [Hin Hdst]];
         inversion Hdst; subst;
         repeat (destruct Hin as [Hphi|Hin];
-          [
-            inversion Hphi; subst;
+          [ inversion Hphi; subst;
             repeat match goal with
             | [ |- (?n = ?n /\ ?r = ?r) \/ _ ] => left; split; reflexivity
             | [ |- ?n = ?n /\ ?r = ?r ] => split; reflexivity
@@ -96,26 +87,26 @@ Ltac defined_at_inversion_proof fn inst_inversion phi_inversion :=
           |]);
         inversion Hin
       |]);
-    inversion PHIS
+    inversion Hphis
   ].
 
 Ltac defined_at_proof :=
-  repeat split; match goal with
+  repeat split;
+    try match goal with
     | [ |- DefinedAt ?fn ?n ?n ] =>
       remember ((fn_insts fn) ! n) as some_inst eqn:Esome_inst;
       compute in Esome_inst;
       destruct some_inst as [inst|];
-      inversion Esome_inst as [Einst];
-      clear Esome_inst;
-      apply defined_at_inst with (i := inst); rewrite Einst; auto;
-      constructor
+      inversion Esome_inst as [Einst]; clear Esome_inst;
+      apply defined_at_inst; apply inst_defined_at with (i := inst);
+      rewrite Einst; auto; constructor
     | [ |- DefinedAt ?fn ?n _ ] =>
       remember ((fn_phis fn) ! n) as some_phis eqn:Esome_phis;
       compute in Esome_phis;
       destruct some_phis as [phis|];
-      inversion Esome_phis as [Ephis];
-      clear Esome_phis;
-      apply defined_at_phi with (phis := phis); rewrite Ephis; auto;
+      inversion Esome_phis as [Ephis]; clear Esome_phis;
+      apply defined_at_phi;
+      apply phi_defined_at with (phis := phis); rewrite Ephis; auto;
       apply Exists_exists;
       match goal with
       | [ HPhi: context [ LLPhi (?ty, ?reg) ?ins ] |- context [ PhiDefs _ ?reg] ] =>
@@ -137,43 +128,33 @@ Ltac defs_are_unique_proof defined_at_inversion :=
 
 Ltac used_at_inversion_proof fn inst_inversion phi_inversion :=
   intros n r Hused_at;
-  inversion Hused_at as [n' r' i INST USES|n' r' block phis PHIS USES];
-  [
-    clear Hused_at;
+  inversion Hused_at as [n' r' Hinst_used_at Hn Hr|n' r' Hphi_used_at Hn Hr]; subst;
+  [ inversion Hinst_used_at as [n' r' i INST USES Hn Hr]; subst;
     apply inst_inversion in INST;
     repeat (destruct INST as [[Hn Hinst]|INST];
-      [ inversion Hinst; clear Hinst; subst i n n' r'; inversion USES
-      |
-      ]);
-      repeat match goal with
-      | [ H: _ = r \/ _ |- _ ] => destruct H
-      | [ H: In _ _ |- _ ] => destruct H
-      end;
+      [ inversion Hinst; clear Hinst; subst; inversion USES;subst|]);
       repeat match goal with
       | [ |- (?n = ?n /\ ?r = ?r) \/ _ ] => left; split; reflexivity
       | [ |- ?n = ?n /\ ?r = ?r ] => split; reflexivity
       | [ |- _ ] => right
       end;
     inversion INST
-  |
-    clear Hused_at; subst n' r';
+  | inversion Hphi_used_at as [n' r' block phis PHIS USES Hn Hr]; subst n' r';
     apply phi_inversion in PHIS;
     repeat (destruct PHIS as [[Hb Hphis]|PHIS];
-      [ inversion Hphis; subst phis; clear Hphis;
+      [ inversion Hphis; subst; clear Hphis;
         apply Exists_exists in USES;
         destruct USES as [x [Hin Huses]];
-        repeat (destruct Hin as [Hphi|Hin];
-          [ subst x;
-            inversion Huses as [dst ins n'' r'' Hphi_in Hdst Hn Hr];
-            subst n'' r'';
+        repeat (destruct Hin as [Hphi|Hin]; subst;
+          [ inversion Huses as [dst ins n'' r'' Hphi_in Hdst Hn Hr]; subst;
             repeat (destruct Hphi_in as [Hbr|Hphi_in];
               [ inversion Hbr; subst n r
               | simpl in Hphi_in
               ])
           | simpl in Hin
           ]);
+          try contradiction;
           repeat match goal with
-          | [ H: False |- _ ] => inversion H
           | [ |- (?n = ?n /\ ?r = ?r) \/ _ ] => left; split; reflexivity
           | [ |- ?n = ?n /\ ?r = ?r ] => split; reflexivity
           | [ |- _ ] => right
@@ -541,53 +522,57 @@ Ltac bb_proof fn inst_inversion bb_headers :=
       end
    end.
 
-Ltac type_proof env Henv :=
+Ltac type_proof env :=
   match goal with
+  | |- context [LLInt ?dst _ ?val ] =>
+    remember (type_of_int val) as t eqn:Ht; simpl in Ht;
+    apply type_int with t;
+    subst; constructor
   | |- context [ LLBinop (?t, ?dst) _ ?op ?lhs ?rhs ] =>
-    remember (env ! lhs) as tl eqn:El; rewrite Henv in El;
-    remember (env ! rhs) as tr eqn:Er; rewrite Henv in Er;
-    compute in El; compute in Er;
+    remember (env ! lhs) as tl eqn:El;
+    remember (env ! rhs) as tr eqn:Er;
+    subst env; compute in El; compute in Er;
     match goal with
     | [ El: tl = Some ?tl', Er: tr = Some ?tr' |- _ ] =>
       apply type_binop with (tl := tl') (tr := tr');
       subst; constructor
     end
   | |- context [ LLJcc ?cond _ _ ] =>
-    remember (env ! cond) as tc eqn:Econd; rewrite Henv in Econd;
-    compute in Econd;
+    remember (env ! cond) as tc eqn:Econd;
+    subst env; compute in Econd;
     match goal with
     | [ Econd: tc = Some (TInt ?tc') |- _ ] =>
       apply type_jcc with (i := tc')
     end;
     subst; constructor
   | |- context [ LLRet (Some ?v) ] =>
-    remember (env ! v) as tv eqn:Ev; rewrite Henv in Ev;
-    compute in Ev;
+    remember (env ! v) as tv eqn:Ev;
+    subst env; compute in Ev;
     match goal with
     | [ El: tv = Some ?tv' |- _ ] =>
       apply type_ret with (t := tv')
     end;
     subst; constructor
   | |- context [ LLSt _ ?a ?v ] =>
-    remember (env ! v) as tv eqn:Ev; rewrite Henv in Ev;
-    compute in Ev;
+    remember (env ! v) as tv eqn:Ev;
+    subst env; compute in Ev;
     match goal with
     | [ Ev: tv = Some ?tv' |- _ ] =>
       apply type_st with (t := tv')
     end;
     subst; constructor
   | |- context [ LLUnop (?t, ?dst) _ ?op ?arg ] =>
-    remember (env ! arg) as ta eqn:Ea; rewrite Henv in Ea;
-    compute in Ea;
+    remember (env ! arg) as ta eqn:Ea;
+    subst env; compute in Ea;
     match goal with
     | [ El: ta = Some ?ta' |- _ ] =>
       apply type_unop with (argt := ta')
     end;
     subst; constructor
   | |- context [ LLSyscall ?dst _ ?sno _ ] =>
-    remember (env ! dst) as td eqn:Ed; rewrite Henv in Ed;
-    remember (env ! sno) as ts eqn:Es; rewrite Henv in Es;
-    compute in Es; compute in Ed;
+    remember (env ! dst) as td eqn:Ed;
+    remember (env ! sno) as ts eqn:Es;
+    subst env; compute in Es; compute in Ed;
     match goal with
     | [ El: ts = Some (TInt ?ts'), Ed: td = Some ?td' |- _ ] =>
       apply type_syscall with (t := td') (tsno := ts')
@@ -596,18 +581,17 @@ Ltac type_proof env Henv :=
   end.
 
 Ltac well_typed_insts fn inst_inversion :=
-  intros n i Hin;
+  constructor; intros n i Hin;
   apply inst_inversion in Hin;
-  remember (ty_env fn) as env eqn:Henv;
   repeat (destruct Hin as [[Hn Hi]|Hin];
-    [ inversion Hi as [Hi'];
-      try (constructor; subst env; constructor)
+    [ inversion Hi; repeat constructor; subst; clear Hi
     |]);
-    try type_proof env Henv;
+    remember (ty_env fn) as env eqn:Henv;
+    try type_proof env;
   inversion Hin.
 
 Ltac well_typed_phis fn phi_inversion :=
-  intros n i phi Hblocks Hin;
+  constructor; intros n i phi Hblocks Hin;
   remember (ty_env fn) as env eqn:Henv;
   apply phi_inversion in Hblocks;
   repeat (destruct Hblocks as [[Hn Hphis]|Hblocks];

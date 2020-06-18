@@ -12,6 +12,6 @@ Inductive LiveAt: func -> reg -> node -> Prop :=
     forall
       (f: func) (r: reg) (n: node) (use: node) (p: list node)
       (PATH: Path f n p use)
-      (NO_DEF: forall (def: node), In def p -> ~DefinedAt f def r)
+      (NO_DEF: forall (def: node), def <> n -> In def p -> ~DefinedAt f def r)
       (USE: UsedAt f use r),
       LiveAt f r n.

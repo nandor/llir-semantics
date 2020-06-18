@@ -5,6 +5,5 @@
 
 Inductive signal :=
   | SIGSEGV
-  | SIGBUS
   | SIGFPE
   .

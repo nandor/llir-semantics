@@ -7,6 +7,7 @@ Require Import Coq.Lists.List.
 
 Require Import LLIR.Maps.
 Require Import LLIR.LLIR.
+Require Import LLIR.Type.
 
 Import ListNotations.
 

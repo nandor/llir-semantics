@@ -15,10 +15,7 @@ Definition rewrite_inst_uses (i: inst) (f: reg -> reg): inst :=
   match i with
   | LLTrap => i
   | LLArg _ _ _ => i
-  | LLInt8 _ _ _ => i
-  | LLInt16 _ _ _ => i
-  | LLInt32 _ _ _ => i
-  | LLInt64 _ _ _ => i
+  | LLInt _ _ _ => i
   | LLJmp _ => i
   | LLUndef _ _ => i
   | LLFrame _ _ _ _ => i

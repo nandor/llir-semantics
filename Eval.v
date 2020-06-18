@@ -27,7 +27,7 @@ Definition objects := PTrie.t object.
 Record frame := mkframe
   { fr_data: objects
   ; fr_regs: PTrie.t value
-  ; fr_args: PTrie.t value
+  ; fr_args: list value
   ; fr_func: name
   ; fr_pc: node
   }.
@@ -40,7 +40,7 @@ Record stack := mkstack
   }.
 
 Record heap := mkheap
-  {
+  { hp_segments: PTrie.t objects
   }.
 
 Record state := mkstate
@@ -104,10 +104,12 @@ Axiom step_unop: unop -> ty -> value -> option value.
 
 Axiom argext: ty -> value -> option value.
 
+Axiom load_from_object: objects -> positive -> positive -> ty -> option value.
+
 Definition step_inst (fr: frame) (st: state) (i: inst): option state :=
   match i with
   | LLArg (ty, dst) next idx =>
-    match (fr.(fr_args) ! (Pos.of_nat idx)) with
+    match nth_error fr.(fr_args) idx  with
     | None => None
     | Some v =>
       match argext ty v with
@@ -118,8 +120,8 @@ Definition step_inst (fr: frame) (st: state) (i: inst): option state :=
       end
     end
 
-  | LLInt32 dst next val =>
-    let fr' := set_vreg_pc fr dst (VInt (INT.Int32 val)) next in
+  | LLInt dst next val =>
+    let fr' := set_vreg_pc fr dst (VInt val) next in
     Some (set_frame st fr')
 
   | LLUnop (ty, dst) next op arg =>
