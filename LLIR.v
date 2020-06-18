@@ -25,6 +25,7 @@ Inductive unop : Type :=
   | LLXext
   | LLTrunc
   | LLNeg
+  | LLBitcast
   .
 
 Inductive binop : Type :=
@@ -51,7 +52,6 @@ Inductive inst : Type :=
   | LLLd (dst: (ty * reg)) (next: node) (addr: reg)
   | LLArg (dst: (ty * reg)) (next: node) (index: nat)
   | LLInt (dst: reg) (next: node) (value: INT.t)
-  | LLMov (dst: (ty * reg)) (next: node) (src: reg)
   | LLSelect (dst: (ty * reg)) (next: node) (cond: reg) (vt: reg) (vf: reg)
   | LLFrame (dst: reg) (next: node) (object: positive) (offset: nat)
   | LLGlobal (dst: reg) (next: node) (segment: positive) (object: positive) (offset: nat)
@@ -59,6 +59,7 @@ Inductive inst : Type :=
   | LLUndef (dst: (ty * reg)) (next: node)
   | LLUnop (dst: (ty * reg)) (next: node) (op: unop) (arg: reg)
   | LLBinop (dst: (ty * reg)) (next: node) (op: binop) (lhs: reg) (rhs: reg)
+  | LLMov (dst: (ty * reg)) (next: node) (src: reg)
   | LLSyscall (dst: reg) (next: node) (sno: reg) (args: list reg)
   | LLCall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg)
   | LLInvoke (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: node)
@@ -138,17 +139,21 @@ Inductive InstDefs: inst -> reg -> Prop :=
 (* Returns the register defined by an instruction and its type. *)
 Definition get_inst_ty_def (i: inst): option (ty * reg) :=
   match i with
-  | LLSyscall dst _ _ _ => Some (syscall_ty, dst)
+  | LLSyscall dst _ _ _ => Some (sys_ret_ty, dst)
   | LLCall dst _ _ _ => dst
   | LLTCall _ _ => None
   | LLInvoke dst _ _ _ _ => dst
   | LLTInvoke _ _ _ => None
 
   | LLArg dst _ _ => Some dst
-  | LLInt dst _ (INT.Int8 _) => Some (TInt I8, dst)
-  | LLInt dst _ (INT.Int16 _) => Some (TInt I16, dst)
-  | LLInt dst _ (INT.Int32 _) => Some (TInt I32, dst)
-  | LLInt dst _ (INT.Int64 _) => Some (TInt I64, dst)
+  | LLInt dst _ v =>
+    let t := match v with
+      | INT.Int8 _ => I8
+      | INT.Int16 _ => I16
+      | INT.Int32 _ => I32
+      | INT.Int64 _ => I64
+      end
+    in Some (TInt t, dst)
   | LLMov dst _ _ => Some dst
 
   | LLFrame dst _ _ _ => Some (ptr_ty, dst)
@@ -169,31 +174,7 @@ Definition get_inst_ty_def (i: inst): option (ty * reg) :=
   end.
 
 Definition get_inst_def (i: inst): option reg :=
-  match i with
-  | LLSyscall dst _ _ _ => Some dst
-  | LLCall (Some (_, dst)) _ _ _ => Some dst
-  | LLCall None _ _ _ => None
-  | LLTCall _ _ => None
-  | LLInvoke (Some (_, dst)) _ _ _ _ => Some dst
-  | LLInvoke None _ _ _ _ => None
-  | LLTInvoke _ _ _ => None
-  | LLArg (_, dst) _ _ => Some dst
-  | LLMov (_, dst) _ _ => Some dst
-  | LLLd (_, dst) _ _ => Some dst
-  | LLUndef (_, dst) _ => Some dst
-  | LLUnop (_, dst) _ _ _ => Some dst
-  | LLBinop (_, dst) _ _ _ _ => Some dst
-  | LLSelect (_, dst) _ _ _ _ => Some dst
-  | LLSt _ _ _ => None
-  | LLRet _ => None
-  | LLJcc _ _ _ => None
-  | LLJmp _ => None
-  | LLTrap => None
-  | LLInt dst _ _ => Some dst
-  | LLFrame dst _ _ _ => Some dst
-  | LLGlobal dst _ _ _ _ => Some dst
-  | LLFunc dst _ _ => Some dst
-  end.
+  option_map snd (get_inst_ty_def i).
 
 Lemma get_inst_def_defs:
   forall (i: inst) (r: reg),

@@ -24,7 +24,8 @@ Inductive ty : Type :=
   .
 
 Definition ptr_ty := TInt I64.
-Definition syscall_ty := TInt I64.
+Definition sys_no_ty := TInt I64.
+Definition sys_ret_ty := TInt I64.
 
 Lemma type_dec:
   forall (t0: ty) (t1: ty),
@@ -82,3 +83,5 @@ Proof.
   - inversion H; constructor.
   - destruct v; simpl in H; subst; constructor.
 Qed.
+
+

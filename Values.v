@@ -166,7 +166,7 @@ Module INT.
     }
   Qed.
 
-  Lemma zero_dec: forall (v: t), IsNonZero v \/ IsZero v.
+  Lemma zero_dec: forall (v: t), {IsNonZero v} + {IsZero v}.
   Proof.
     intros v; destruct v.
     - destruct (I8.eq_dec  v I8.zero);  [right; subst|left]; constructor; auto.
@@ -180,9 +180,9 @@ Inductive sym : Type :=
   (* Pointer to the program arguments. *)
   | SInit (object: positive) (offset: positive)
   (* Pointer into a stack frame *)
-  | SFrame (frame: positive) (object: positive) (offset: positive)
+  | SFrame (frame: positive) (object: positive) (offset: nat)
   (* Pointer to a global data item *)
-  | SAtom (segment: positive) (object: positive) (offset: positive)
+  | SAtom (segment: positive) (object: positive) (offset: nat)
   (* Pointer to a function. *)
   | SFunc (func: name)
   .
@@ -216,3 +216,11 @@ Inductive IsFalse: value -> Prop :=
   | is_false_int: forall (v: INT.t) (Z: INT.IsZero v), IsFalse (VInt v)
   | is_false_und: IsFalse VUnd
   .
+
+Lemma value_is_true_or_false: forall (v: value), {IsTrue v} + {IsFalse v}.
+Proof.
+  intros v; destruct v.
+  - destruct (INT.zero_dec v); [left|right]; constructor; auto.
+  - left; constructor.
+  - right; constructor.
+Qed.

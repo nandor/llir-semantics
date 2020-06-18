@@ -125,6 +125,12 @@ Inductive WellTypedInst: type_env -> inst -> Prop :=
       (DST_TY: well_typed_reg env dst t)
       (OP: WellTypedUnop op argt t),
       WellTypedInst env (LLUnop (t, dst) next op arg)
+  | type_mov:
+    forall (env: type_env) (op: unop) (next: node)
+      (arg: reg) (dst: reg) (t: ty)
+      (ARG_TY: well_typed_reg env arg t)
+      (DST_TY: well_typed_reg env dst t),
+      WellTypedInst env (LLMov (t, dst) next arg)
   | type_invoke_void:
     forall (env: type_env) (next: node)
       (dst: reg) (t: ty)
@@ -149,9 +155,9 @@ Inductive WellTypedInst: type_env -> inst -> Prop :=
       WellTypedInst env (LLTCall callee args)
   | type_syscall:
     forall (env: type_env) (next: node)
-      (sno: reg) (args: list reg) (tsno: ty_int) (dst: reg) (t: ty)
-      (SNO_TY: well_typed_reg env sno (TInt tsno))
-      (DST_TY: well_typed_reg env dst t),
+      (sno: reg) (args: list reg) (tsno: ty_int) (dst: reg)
+      (SNO_TY: well_typed_reg env sno sys_no_ty)
+      (DST_TY: well_typed_reg env dst sys_ret_ty),
       WellTypedInst env (LLSyscall dst next sno args)
   | type_trap:
     forall (env: type_env),
