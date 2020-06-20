@@ -227,6 +227,22 @@ Module PTrie <: PARTIAL_MAP.
         | xI ii => Node l o (update r ii)
         end
       end.
+
+    Theorem update_correct:
+      forall (k: key) (a: t V),
+        get (update a k) k = option_map f (get a k)
+        /\
+        forall (k': key), (k <> k') -> get (update a k) k' = get a k'.
+    Proof.
+      induction k; intros a; destruct a; split; simpl; 
+        try reflexivity;
+        try apply IHk;
+        intros k' Hne; destruct k';
+        try reflexivity;
+        try apply IHk;
+        try contradiction;
+        intros contra; subst k; contradiction.
+    Qed.
   End UPDATE.
 
   Fixpoint append (l: positive) (r: positive): positive :=

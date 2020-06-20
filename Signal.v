@@ -6,4 +6,5 @@
 Inductive signal :=
   | SIGSEGV
   | SIGFPE
+  | SIGILL
   .

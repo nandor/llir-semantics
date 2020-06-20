@@ -15,6 +15,15 @@ Import ListNotations.
 Section FUNC_VALIDITY.
   Variable f: func.
 
+  Inductive JoinPoint: node -> Prop :=
+    | join_point:
+      forall 
+        (n: node) (p0: node) (p1: node)
+        (PRED0: SuccOf f p0 n)
+        (PRED1: SuccOf f p1 n)
+        (NE: p0 <> p1),
+        JoinPoint n.
+
   Definition uses_have_defs :=
     forall (use: node) (r: reg),
       UsedAt f use r ->
@@ -42,13 +51,67 @@ Section FUNC_VALIDITY.
       /\
       (PhiDefinedAt f def r -> ~InstDefinedAt f def r).
 
+  Definition phis_are_complete :=
+    forall
+      (n: node) (p: node) (block: list phi) 
+      (t: ty) (r: reg) (ins: list (node * reg)),
+      SuccOf f p n ->
+      Some block = f.(fn_phis) ! n ->
+      In (LLPhi (t, r) ins) block ->
+      exists (r': reg), In (p, r') ins.
+
+  Definition succs_are_valid :=
+    forall
+      (n: node) (m: node) (i: inst),
+      Some i = f.(fn_insts) ! n ->
+      Succeeds i m ->
+      SuccOf f n m.
+
   Record valid_func : Prop :=
     { fn_uses_have_defs: uses_have_defs
     ; fn_defs_are_unique: defs_are_unique
     ; fn_blocks_are_valid: blocks_are_valid
     ; fn_inst_does_not_use_defs: inst_does_not_use_defs
     ; fn_phi_or_inst: phi_or_inst
+    ; fn_phis_are_complete: phis_are_complete
+    ; fn_succs_are_valid: succs_are_valid
     }.
+
+  Theorem join_point_header:
+    forall (n: node),
+      valid_func ->
+      JoinPoint n ->
+      BasicBlockHeader f n.
+  Proof.
+    intros n Hvalid Hjoin; inversion Hjoin.
+    generalize (fn_blocks_are_valid Hvalid n); intros Hblock.
+    destruct Hblock as [[h Hbb]|Hno_inst].
+    {
+      constructor.
+      {
+        apply bb_reaches with h; auto.
+      }
+      {
+        intros term Hsucc.
+        inversion Hbb; subst.
+        {
+          inversion HEADER.
+          apply TERM; auto.
+        }
+        {
+          apply UNIQ in PRED0; apply UNIQ in PRED1; subst; contradiction.
+        }
+      }
+      {
+        inversion PRED0; auto.
+      }
+    }
+    {
+      inversion PRED0.
+      rewrite Hno_inst in HM.
+      contradiction.
+    }
+  Qed.
 
   Theorem defs_dominate_uses:
     valid_func ->

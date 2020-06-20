@@ -466,6 +466,15 @@ Section PROPAGATE_PROPERTIES.
     }
   Qed.
 
+  Lemma preserves_join_points:
+    forall (n: node),
+      JoinPoint f n <-> JoinPoint (propagate_store_to_load f) n.
+  Proof.
+    intros n; split; intros H; inversion H;
+      apply join_point with p0 p1; auto;
+      apply preserves_succ; auto.
+  Qed.
+
   Lemma preserves_blocks:
     forall (h: node) (e: node),
       BasicBlock f h e <->
@@ -956,6 +965,54 @@ Section PROPAGATE_PROPERTIES.
       generalize (fn_phi_or_inst def r); intros [Hip _].
       apply Hip in Hdef_at.
       contradiction.
+    }
+    (* Phis are complete *)
+    {
+      intros n p block t r ins Hsucc Hphis Hin.
+      rewrite Heqf' in Hphis.
+      unfold propagate_store_to_load in Hphis.
+      simpl in Hphis.
+      rewrite <- Heqaa in Hphis.
+      rewrite <- Heqrs in Hphis.
+      rewrite <- Heqloads in Hphis.
+      unfold rewrite_phis in Hphis.
+      rewrite PTrie.map_get in Hphis.
+      destruct ((fn_phis f) ! n) as [block'|] eqn:Eblock; [|inversion Hphis].
+      inversion Hphis as [Hphis']; subst block; clear Hphis.
+      unfold rewrite_phi_block in Hin.
+      rewrite in_map_iff in Hin.
+      destruct Hin as [phi [Hphi Hin ]].
+      unfold rewrite_phi in Hphi; unfold rewrite_phi_uses in Hphi.
+      destruct phi as [[t' dst'] ins']; inversion Hphi; subst t' dst'.
+      rewrite Heqf' in Hsucc; apply preserves_succ in Hsucc.
+      symmetry in Eblock.
+      generalize (fn_phis_are_complete 
+        n p block' t r ins' Hsucc Eblock Hin
+      ); intros [r' Hinr].
+      exists (rewrite_reg (closure loads) r').
+      apply in_map_iff. exists (p, r'); split; auto.
+    }
+    (* Succs are valid *)
+    {
+      intros n m i Hinst Hsucc.
+      rewrite Heqf'.
+      apply preserves_succ.
+      rewrite Heqf' in Hinst.
+      unfold propagate_store_to_load in Hinst.
+      simpl in Hinst.
+      rewrite <- Heqaa in Hinst.
+      rewrite <- Heqrs in Hinst.
+      rewrite <- Heqloads in Hinst.
+      unfold rewrite_insts in Hinst.
+      rewrite PTrie.map_get in Hinst.
+      destruct ((fn_insts f) ! n) as [i'|] eqn:Ei'; [|inversion Hinst].
+      simpl in Hinst; inversion Hinst as [Hinst'].
+      symmetry in Ei'.
+      apply (fn_succs_are_valid n m i' Ei').
+      destruct i'; rewrite Hinst' in Hsucc;
+      unfold rewrite_inst in Hsucc;
+      unfold rewrite_inst_uses in Hsucc;
+      inversion Hsucc; subst; constructor.
     }
   Qed.
 

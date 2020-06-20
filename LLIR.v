@@ -7,7 +7,7 @@ Require Import Coq.Lists.List.
 
 Require Import LLIR.Maps.
 Require Export LLIR.Values.
-Require Import LLIR.Type.
+Require Export LLIR.Types.
 
 Import ListNotations.
 
@@ -65,7 +65,7 @@ Inductive inst : Type :=
   | LLInvoke (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: node)
   | LLTCall (callee: reg) (args: list reg)
   | LLTInvoke (callee: reg) (args: list reg) (exn: node)
-  | LLSt (next: node) (addr: reg) (val: reg)
+  | LLSt (next: node) (addr: reg) (value: reg)
   | LLRet (value: option reg)
   | LLJcc (cond: reg) (bt: node) (bf: node)
   | LLJmp (target: node)
@@ -632,6 +632,32 @@ Section FUNCTION.
         (INST: Some i = f.(fn_insts) ! n)
         (TERM: Terminator i),
         TermAt n.
+
+  Lemma non_terminal_unique_successor:
+    forall (n: node) (s: node) (s': node),
+      ~TermAt n ->
+       SuccOf n s ->
+       SuccOf n s' ->
+       s = s'.
+  Proof.
+    intros n s s' Hterm Hsucc Hsucc'.
+    destruct ((fn_insts f) ! n) as [i|] eqn:Einst.
+    {
+      destruct i eqn:Ei;
+        try (
+          assert (TermAt n); 
+          [apply term_at with i; subst; auto; constructor|]; 
+          contradiction
+        );
+        inversion Hsucc; inversion Hsucc';
+        rewrite Einst in HN; inversion HN; subst i0; clear HN; inversion SUCC;
+        rewrite Einst in HN0; inversion HN0; subst i1; clear HN0; inversion SUCC0;
+        subst; reflexivity.
+    }
+    {
+      inversion Hsucc; rewrite Einst in HN; inversion HN.
+    }
+  Qed.
 
   Inductive ExitAt: node -> Prop :=
     | exit_at:

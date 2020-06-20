@@ -15,16 +15,15 @@ Require Import LLIR.Block.
 Require Import LLIR.Typing.
 Require Import LLIR.Signal.
 Require Import LLIR.Liveness.
+Require Import LLIR.Syscall.
 
 Import ListNotations.
 
 Inductive event: Type.
 
-Definition trace := list event.
-
 Inductive estate: Type :=
   | State (stk: stack) (h: heap)
-  | Exit (stk: PTrie.t frame) (h: heap)
+  | Exit (stk: frame_map) (h: heap)
   | Signal (stk: stack) (h: heap) (sig: signal)
   .
 
@@ -110,12 +109,6 @@ Definition update_frame (stk: stack) (fn: frame -> frame): stack :=
    ; stk_init := stk.(stk_init)
    |}.
 
-Definition get_vreg (fr: frame) (r: reg): option value :=
-  match fr.(fr_regs) ! r with
-  | None => None
-  | Some v => Some v
-  end.
-
 Definition set_pc (stk: stack) (pc: node): stack :=
   update_frame stk (fun frame => set_pc frame pc).
 
@@ -125,29 +118,41 @@ Definition set_vreg (stk: stack) (r: reg) (v: value): stack :=
 Definition set_vreg_pc (stk: stack) (r: reg) (v: value) (pc: node): stack :=
   update_frame stk (fun frame => set_vreg_pc frame r v pc).
 
+Definition jump_to_phi (stk: stack) (t: node): stack :=
+  update_frame stk (fun frame => jump_to_phi frame t).
+
 Axiom eval_unop: ty -> unop -> value -> option value.
 
 Axiom eval_binop: ty -> binop -> value -> value -> option value.
 
 (* Predicate expressing loads which do not result in a sigal *)
-Inductive LoadSuccess: objects -> positive -> positive -> ty -> value -> Prop :=
-  .
-
-(* Loads which may result in a signal. *)
-Inductive LoadSignal: objects -> positive -> positive -> ty -> signal -> Prop :=
-  .
-
 Inductive LoadVal: stack -> heap -> value -> ty -> value -> Prop :=
   .
 
+(* Loads which may result in a signal. *)
 Inductive LoadSig: stack -> heap -> value -> ty -> signal -> Prop :=
   .
 
 Lemma load_value_or_signal:
   forall (stk: stack) (h: heap) (t: ty) (addr: value),
-    {exists (v: value), LoadVal stk h addr t v}
-    +
-    {exists (sig: signal), LoadSig stk h addr t sig}.
+    (exists (v: value), LoadVal stk h addr t v)
+    \/
+    (exists (sig: signal), LoadSig stk h addr t sig).
+Admitted.
+
+(* Predicate expressing stores which do not result in a sigal *)
+Inductive StoreVal: stack -> heap -> value -> value -> heap -> Prop :=
+  .
+
+(* Stores which may result in a signal. *)
+Inductive StoreSig: stack -> heap -> value -> signal -> Prop :=
+  .
+
+Lemma store_value_or_signal:
+  forall (stk: stack) (h: heap) (addr: value) (v: value),
+    (exists (h': heap), StoreVal stk h addr v h')
+    \/
+    (exists (sig: signal), StoreSig stk h addr sig).
 Admitted.
 
 Inductive UnaryVal: value -> unop -> ty -> value -> Prop :=
@@ -157,10 +162,12 @@ Inductive UnarySig: value -> unop -> ty -> signal -> Prop :=
   .
 
 Lemma unary_value_or_signal:
-  forall (arg: value) (op: unop) (t: ty),
-    {exists (v: value), UnaryVal arg op t v}
-    +
-    {exists (sig: signal), UnarySig arg op t sig}.
+  forall (op: unop) (arg: value) (arg_ty: ty) (dst_ty: ty),
+    WellTypedUnop op arg_ty dst_ty ->
+    TypeOfValue arg arg_ty ->
+    (exists (v: value), TypeOfValue v dst_ty /\ UnaryVal arg op dst_ty v)
+    \/
+    (exists (sig: signal), UnarySig arg op dst_ty sig).
 Admitted.
 
 Inductive BinaryVal: value -> value -> binop -> ty -> value -> Prop :=
@@ -170,10 +177,14 @@ Inductive BinarySig: value -> value -> binop -> ty -> signal -> Prop :=
   .
 
 Lemma binary_value_or_signal:
-  forall (lhs: value) (rhs: value) (op: binop) (t: ty),
-    {exists (v: value), BinaryVal lhs rhs op t v}
-    +
-    {exists (sig: signal), BinarySig lhs rhs op t sig}.
+  forall (op: binop) (lhs: value) (rhs: value) 
+    (lhs_ty: ty) (rhs_ty: ty) (dst_ty: ty),
+    WellTypedBinop op lhs_ty rhs_ty dst_ty ->
+    TypeOfValue lhs lhs_ty ->
+    TypeOfValue rhs rhs_ty ->
+    (exists (v: value), TypeOfValue v dst_ty /\ BinaryVal lhs rhs op dst_ty v)
+    \/
+    (exists (sig: signal), BinarySig lhs rhs op dst_ty sig).
 Admitted.
 
 Inductive Argument: frame -> nat -> ty -> value -> Prop :=
@@ -244,14 +255,80 @@ Proof.
   }
 Qed.
 
+Lemma syscall_args:
+  forall 
+    (p: prog) (f: func)
+    (fr: frame) (args: list reg) (env: type_env),
+    (Some f = p ! (fr_func fr)) ->
+    (forall (arg: reg),
+      In arg args ->
+      well_typed_reg env arg sys_arg_ty) ->
+    (forall (arg: reg),
+      LiveAt f arg (fr_pc fr) ->
+      exists (v: value), Some v = (fr_regs fr) ! arg) ->
+    (forall (arg: reg),
+      In arg args ->
+      LiveAt f arg (fr_pc fr)) ->
+    (forall (r: reg) (v: value),
+       Some v = (fr_regs fr) ! r ->
+       exists (t: ty), Some t = env ! r /\ TypeOfValue v t) ->
+    exists (values: list value), SyscallArgs fr args values.
+Proof.
+  intros p f fr args env Hf Htyped Hvals Hlive Hty_of.
+  induction args; [exists []; constructor |].
+  assert (Htypes': forall arg, In arg args -> well_typed_reg env arg sys_arg_ty).
+  { intros arg Hin. apply Htyped. right. auto. }
+  assert (Hlive': forall arg, In arg args -> LiveAt f arg (fr_pc fr)).
+  { intros arg Hin. apply Hlive. right. auto. }
+  generalize (IHargs Htypes' Hlive'); intros [values Hvalues]. 
+  clear Htypes' Hlive' IHargs.
+  assert (Hin: In a (a :: args)). { left; auto. }
+  generalize (Hlive a Hin); intros Hlive_a.
+  generalize (Hvals a Hlive_a); intros [v Hval_a].
+  exists (v :: values); constructor; auto.
+  generalize (Hty_of a v Hval_a); intros [t [Hty Hty_of_v]].
+  generalize (Htyped a Hin); intros Hwt.
+  inversion Hwt as [Hty'].
+  rewrite <- Hty in Hty'; inversion Hty'; subst t; clear Hty'.
+  inversion Hty_of_v; subst; try constructor.
+  inversion TY; constructor.
+Qed.
+
 Inductive step (p: prog): estate -> trace -> estate -> Prop :=
+  | eval_st_value:
+    forall
+      (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
+      (next: node) (addr: reg) (arg: reg)
+      (addr_value: value) (arg_value: value) (h': heap)
+      (EXEC: Executing p stk fr f pc (LLSt next addr arg))
+      (ADDR: Some addr_value = fr.(fr_regs) ! addr)
+      (VALUE: Some arg_value = fr.(fr_regs) ! arg)
+      (LOAD: StoreVal stk h addr_value arg_value h'),
+      step
+        p
+        (State stk h)
+        []
+        (State (set_pc stk next) h')
+  | eval_st_sig:
+    forall
+      (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
+      (next: node) (addr: reg) (arg: reg)
+      (addr_value: value) (sig: signal)
+      (EXEC: Executing p stk fr f pc (LLSt next addr arg))
+      (ADDR: Some addr_value = fr.(fr_regs) ! addr)
+      (LOAD: StoreSig stk h addr_value sig),
+      step
+        p
+        (State stk h)
+        []
+        (Signal stk h sig)
   | eval_ld_value:
     forall
       (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
       (dst: reg) (t: ty) (next: node) (addr: reg)
       (addr_value: value) (dst_value: value)
       (EXEC: Executing p stk fr f pc (LLLd (t, dst) next addr))
-      (ADDR: Some addr_value = get_vreg fr addr)
+      (ADDR: Some addr_value = fr.(fr_regs) ! addr)
       (LOAD: LoadVal stk h addr_value t dst_value),
       step
         p
@@ -264,7 +341,7 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
       (dst: reg) (t: ty) (next: node) (addr: reg)
       (addr_value: value) (sig: signal)
       (EXEC: Executing p stk fr f pc (LLLd (t, dst) next addr))
-      (ADDR: Some addr_value = get_vreg fr addr)
+      (ADDR: Some addr_value = fr.(fr_regs) ! addr)
       (LOAD: LoadSig stk h addr_value t sig),
       step
         p
@@ -299,8 +376,8 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
       (dst: reg) (t: ty) (next: node) (cond: reg) (lhs: reg) (rhs: reg)
       (cond_value: value) (lhs_value: value)
       (EXEC: Executing p stk fr f pc (LLSelect (t, dst) next cond lhs rhs))
-      (COND: Some cond_value = get_vreg fr cond)
-      (LHS: Some lhs_value = get_vreg fr lhs)
+      (COND: Some cond_value = fr.(fr_regs) ! cond)
+      (LHS: Some lhs_value = fr.(fr_regs) ! lhs)
       (TRUE: IsTrue cond_value),
       step
         p
@@ -313,8 +390,8 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
       (dst: reg) (t: ty) (next: node) (cond: reg) (lhs: reg) (rhs: reg)
       (cond_value: value) (rhs_value: value)
       (EXEC: Executing p stk fr f pc (LLSelect (t, dst) next cond lhs rhs))
-      (COND: Some cond_value = get_vreg fr cond)
-      (RHS: Some rhs_value = get_vreg fr rhs)
+      (COND: Some cond_value = fr.(fr_regs) ! cond)
+      (RHS: Some rhs_value = fr.(fr_regs) !  rhs)
       (TRUE: IsFalse cond_value),
       step
         p
@@ -338,14 +415,14 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
  | eval_global:
     forall
       (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
-      (dst: reg) (next: node) 
+      (dst: reg) (next: node)
       (segment: positive) (object: positive) (offset: nat)
       (EXEC: Executing p stk fr f pc (LLGlobal dst next segment object offset)),
       step
         p
         (State stk h)
         []
-        (State 
+        (State
           (set_vreg_pc stk dst
             (VSym (SAtom segment object offset))
             next)
@@ -379,21 +456,21 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
         p
         (State stk h)
         []
-        (State (set_pc stk target) h)
+        (State (jump_to_phi stk target) h)
   | eval_jcc_true:
     forall
       (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
       (cond: node)
       (brancht: node) (branchf: node)
-      (cond_value: value)
+      (cond_value: value) 
       (EXEC: Executing p stk fr f pc (LLJcc cond brancht branchf))
-      (COND: Some cond_value = get_vreg fr cond)
+      (COND: Some cond_value = fr.(fr_regs) ! cond)
       (TRUE: IsTrue cond_value),
       step
         p
         (State stk h)
         []
-        (State (set_pc stk brancht) h)
+        (State (jump_to_phi stk brancht) h)
   | eval_jcc_false:
     forall
       (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
@@ -401,20 +478,20 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
       (brancht: node) (branchf: node)
       (cond_value: value)
       (EXEC: Executing p stk fr f pc (LLJcc cond brancht branchf))
-      (COND: Some cond_value = get_vreg fr cond)
+      (COND: Some cond_value = fr.(fr_regs) ! cond)
       (FALSE: IsFalse cond_value),
       step
         p
         (State stk h)
         []
-        (State (set_pc stk brancht) h)
+        (State (jump_to_phi stk branchf) h)
   | eval_unary_value:
     forall
       (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
       (dst: reg) (ty: ty) (next: node) (op: unop) (arg: reg)
       (dst_value: value) (arg_value: value)
       (EXEC: Executing p stk fr f pc (LLUnop (ty, dst) next op arg))
-      (ARG: Some arg_value = get_vreg fr arg)
+      (ARG: Some arg_value = fr.(fr_regs) ! arg)
       (UNOP: UnaryVal arg_value op ty dst_value),
       step
         p
@@ -427,7 +504,7 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
       (dst: reg) (ty: ty) (next: node) (op: unop) (arg: reg)
       (arg_value: value) (sig: signal)
       (EXEC: Executing p stk fr f pc (LLUnop (ty, dst) next op arg))
-      (ARG: Some arg_value = get_vreg fr arg)
+      (ARG: Some arg_value = fr.(fr_regs) ! arg)
       (SIG: UnarySig arg_value op ty sig),
       step
         p
@@ -440,8 +517,8 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
       (dst: reg) (t: ty) (op: binop) (lhs: reg) (rhs: reg) (next: node)
       (lhs_value: value) (rhs_value: value) (dst_value: value)
       (EXEC: Executing p stk fr f pc (LLBinop (t, dst) next op lhs rhs))
-      (LHS: Some lhs_value = get_vreg fr lhs)
-      (RHS: Some rhs_value = get_vreg fr rhs)
+      (LHS: Some lhs_value = fr.(fr_regs) ! lhs)
+      (RHS: Some rhs_value = fr.(fr_regs) ! rhs)
       (BINOP: BinaryVal lhs_value rhs_value op t dst_value),
       step
         p
@@ -454,8 +531,8 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
       (dst: reg) (t: ty) (op: binop) (lhs: reg) (rhs: reg) (next: node)
       (lhs_value: value) (rhs_value: value) (sig: signal)
       (EXEC: Executing p stk fr f pc (LLBinop (t, dst) next op lhs rhs))
-      (LHS: Some lhs_value = get_vreg fr lhs)
-      (RHS: Some rhs_value = get_vreg fr rhs)
+      (LHS: Some lhs_value = fr.(fr_regs) ! lhs)
+      (RHS: Some rhs_value = fr.(fr_regs) ! rhs)
       (BINOP: BinarySig lhs_value rhs_value op t sig),
       step
         p
@@ -468,12 +545,85 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
       (dst: reg) (ty: ty) (next: node) (arg: reg)
       (arg_value: value)
       (EXEC: Executing p stk fr f pc (LLMov (ty, dst) next arg))
-      (ARG: Some arg_value = get_vreg fr arg),
+      (ARG: Some arg_value = fr.(fr_regs) ! arg),
       step
         p
         (State stk h)
         []
         (State (set_vreg_pc stk dst arg_value next) h)
+  | eval_syscall_ret:
+    forall
+      (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
+      (dst: reg) (next: node) (tr: trace)
+      (args: list reg) (arg_values: list value)
+      (sno: reg) (sno_call: syscall) (sno_value: value) (dst_value: INT.I64.t)
+      (stk': stack) (h': heap)
+      (ARGS: SyscallArgs fr args arg_values)
+      (SNO: Some sno_value = fr.(fr_regs) ! sno)
+      (SNO_CALL: SyscallNumber sno_value sno_call)
+      (EXEC: Executing p stk fr f pc (LLSyscall dst next sno args))
+      (SYS: SyscallRet sno_call arg_values stk h tr stk' h' dst_value),
+      step
+        p
+        (State stk h)
+        tr
+        (State (set_vreg_pc stk' dst (VInt (INT.Int64 dst_value)) next) h')
+  | eval_syscall_sig:
+    forall
+      (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
+      (dst: reg) (next: node) (tr: trace)
+      (args: list reg) (arg_values: list value)
+      (sno: reg) (sno_call: syscall) (sno_value: value)
+      (sig: signal)
+      (ARGS: SyscallArgs fr args arg_values)
+      (SNO: Some sno_value = fr.(fr_regs) ! sno)
+      (SNO_CALL: SyscallNumber sno_value sno_call)
+      (EXEC: Executing p stk fr f pc (LLSyscall dst next sno args))
+      (SYS: SyscallSig sno_call arg_values stk h tr sig),
+      step
+        p
+        (State stk h)
+        tr
+        (Signal stk h sig)
+  | eval_syscall_nosys:
+    forall
+      (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
+      (dst: reg) (next: node) (tr: trace)
+      (args: list reg) (arg_values: list value)
+      (sno: reg) (sno_value: value)
+      (ARGS: SyscallArgs fr args arg_values)
+      (SNO: Some sno_value = fr.(fr_regs) ! sno)
+      (SNO_NO_CALL: SyscallNoSys sno_value)
+      (EXEC: Executing p stk fr f pc (LLSyscall dst next sno args)),
+      step
+        p
+        (State stk h)
+        tr
+        (State (set_vreg_pc stk dst (VInt (INT.Int64 ENOSYS)) next) h)
+  | eval_syscall_und_enosys:
+    forall
+      (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
+      (dst: reg) (next: node) (tr: trace)
+      (args: list reg) (arg_values: list value)
+      (sno: reg) (sno_value: value)
+      (ARGS: SyscallArgs fr args arg_values)
+      (SNO: Some sno_value = fr.(fr_regs) ! sno)
+      (SNO_NO_CALL: SyscallUndef sno_value)
+      (EXEC: Executing p stk fr f pc (LLSyscall dst next sno args)),
+      step
+        p
+        (State stk h)
+        tr
+        (State (set_vreg_pc stk dst (VInt (INT.Int64 ENOSYS)) next) h)
+ | eval_trap:
+    forall
+      (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
+      (EXEC: Executing p stk fr f pc LLTrap),
+      step
+        p
+        (State stk h)
+        []
+        (Signal stk h SIGILL)
   .
 
 Theorem well_typed_progress:
@@ -484,7 +634,6 @@ Theorem well_typed_progress:
     ~Final st ->
     exists (tr: trace) (st': estate),
       step p st tr st'.
-(*
 Proof.
   intros p st Hwty Hvp Hv Hnf; destruct st.
   {
@@ -501,10 +650,22 @@ Proof.
     ]; subst i'' func' frame' p''.
     assert (H_f_valid: valid_func f).
     { unfold valid_prog in Hvp. apply Hvp with (n := fr_func fr); auto. }
+    assert (Hwtf: WellTypedFunc f).
+    { inversion Hwty; apply FUNCS with (n := fr_func fr); auto. }
+    assert (Hwti: WellTypedInst (ty_env f) i).
+    {
+      inversion Hwtf; inversion INSTS;
+      apply INSTS0 with (n := (fr_pc fr)); auto.
+    }
+    inversion Hvalids; subst fr_id frames.
     generalize (uses_are_defined p h stk f fr pc i Hv Hexec); intros Hval.
     rewrite H.
+    rewrite <- H in Hstk'; inversion Hstk'; clear Hstk';
+    subst stk_fr' stk_frs' stk_frames'' stk_init''.
+    rewrite <- FRAME in FRAME'; inversion FRAME'; subst fr0.
+    rewrite <- FUNC in FUNC'; inversion FUNC'; subst f0.
 
-    Ltac used_value f fr pc i sym sym_val Hsym:=
+    Ltac used_value f fr pc i sym sym_val Hsym Hreg :=
       match goal with
       | [ Hval: forall (r: reg), UsedAt f pc r -> _ |- _ ] =>
         let H := fresh in
@@ -512,10 +673,9 @@ Proof.
         [ constructor; apply inst_used_at with i; subst i pc; auto; constructor
         |];
         apply Hval in H;
-        let H' := fresh in
-        destruct H as [sym_val H'];
-        assert (Hsym: Some sym_val = get_vreg fr sym);
-        [ unfold get_vreg; rewrite H'; reflexivity |]
+        destruct H as [sym_val Hreg];
+        assert (Hsym: Some sym_val = fr.(fr_regs) ! sym);
+        [ rewrite Hreg; reflexivity |]
       end.
 
     Ltac step_state :=
@@ -528,7 +688,7 @@ Proof.
       | [ dst: ty * reg |- _ ] => destruct dst as [t dst]
       end.
     {
-      used_value f fr pc i addr addr_value Haddr.
+      used_value f fr pc i addr addr_value Haddr Haddr_reg.
       destruct (load_value_or_signal stk h t addr_value) as [Hload|Hsig].
       {
         destruct Hload as [dst_value Hload].
@@ -560,17 +720,17 @@ Proof.
       step_state.
     }
     {
-      used_value f fr pc i cond cond_value Hcond.
+      used_value f fr pc i cond cond_value Hcond Hcond_reg.
       destruct (value_is_true_or_false cond_value) as [Eq|Ne].
       {
-        used_value f fr pc i vt vt_value Hvt.
+        used_value f fr pc i vt vt_value Hvt Hvt_reg.
         generalize (eval_select_true
           p stk h fr f pc dst t next cond vt vf
           cond_value vt_value Hexec Hcond Hvt Eq
         ); step_state.
       }
       {
-        used_value f fr pc i vf vf_value Hvf.
+        used_value f fr pc i vf vf_value Hvf Hvf_reg.
         generalize (eval_select_false
           p stk h fr f pc dst t next cond vt vf
           cond_value vf_value Hexec Hcond Hvf Ne
@@ -578,7 +738,7 @@ Proof.
       }
     }
     {
-      generalize (eval_frame 
+      generalize (eval_frame
         p stk h fr f pc dst next object offset
         Hexec
       ); step_state.
@@ -592,8 +752,15 @@ Proof.
     { generalize (eval_func p stk h fr f pc dst next func Hexec); step_state. }
     { generalize (eval_und p stk h fr f pc t dst next Hexec); step_state. }
     {
-      used_value f fr pc i arg arg_value Harg.
-      destruct (unary_value_or_signal arg_value op t) as [[dst_value Hdst]|[sig Hsig]].
+      used_value f fr pc i arg arg_value Harg Harg_reg.
+      inversion Hwti; subst t0 dst0 next0 op0 arg0.
+      unfold well_typed_reg in ARG_TY;
+      destruct (VALS arg arg_value Harg) as [arg_ty [Harg_ty Harg_type_of]];
+      rewrite ARG_TY in Harg_ty; inversion Harg_ty; subst argt.
+      destruct (unary_value_or_signal op arg_value arg_ty t OP Harg_type_of) as 
+        [ [dst_value [_ Hdst]]
+        | [sig Hsig]
+        ].
       {
         generalize (eval_unary_value
           p stk h fr f pc dst t next op arg dst_value arg_value
@@ -608,9 +775,18 @@ Proof.
       }
     }
     {
-      used_value f fr pc i lhs lhs_value Hlhs.
-      used_value f fr pc i rhs rhs_value Hrhs.
-      destruct (binary_value_or_signal lhs_value rhs_value op t) as [[dst_value Hdst]|[sig Hsig]].
+      used_value f fr pc i lhs lhs_value Hlhs Hlhs_reg.
+      used_value f fr pc i rhs rhs_value Hrhs Hrhs_reg.
+      inversion Hwti; subst t0 dst0 next0 op0 l r.
+      unfold well_typed_reg in LHS_TY;
+      destruct (VALS lhs lhs_value Hlhs) as [lhs_ty [Hlhs_ty Hlhs_type_of]];
+      rewrite LHS_TY in Hlhs_ty; inversion Hlhs_ty; subst tl.
+      unfold well_typed_reg in RHS_TY;
+      destruct (VALS rhs rhs_value Hrhs) as [rhs_ty [Hrhs_ty Hrhs_type_of]];
+      rewrite RHS_TY in Hrhs_ty; inversion Hrhs_ty; subst tr.
+      destruct (binary_value_or_signal 
+        op lhs_value rhs_value lhs_ty rhs_ty t 
+        OP Hlhs_type_of Hrhs_type_of) as [[dst_value [_ Hdst]]|[sig Hsig]].
       {
         generalize (eval_binary_value
           p stk h fr f pc dst t op lhs rhs next lhs_value rhs_value dst_value
@@ -625,14 +801,144 @@ Proof.
       }
     }
     {
-      used_value f fr pc i src src_value Hsrc.
-      generalize (eval_mov 
+      used_value f fr pc i src src_value Hsrc Hsrc_reg.
+      generalize (eval_mov
         p stk h fr f pc dst t next src src_value
         Hexec Hsrc
       ); step_state.
     }
+    {
+      (* LLSyscall *)
+      used_value f fr pc i sno sno_value Hsno Hsno_reg.
+      symmetry in Hsno_reg.
+      generalize (VALS sno sno_value Hsno_reg); intros [ty [Hty Hty_of]].
+      inversion Hwti; subst next0 dst0 sno0 args1.
+      unfold well_typed_reg in SNO_TY.
+      rewrite <- Hty in SNO_TY; inversion SNO_TY; subst ty.
+      rename args0 into sys_args.
+      assert (Hargs_live: forall arg, In arg sys_args -> LiveAt f arg (fr_pc fr)).
+      {
+        intros arg Hi3n.
+        apply live_at with (use := pc) (p := [pc]).
+        - subst pc; constructor; apply REACH.
+        - intros def contra Hin; inversion Hin; subst; contradiction.
+        - apply used_at_inst; apply inst_used_at with i; subst; try constructor; auto.
+      }
+      generalize (syscall_args 
+        p f fr sys_args (ty_env f)
+        FUNC ARG_TY REGS Hargs_live VALS
+      ); intros [sys_values Hsys_args].
+      destruct (syscall_number_complete sno_value Hty_of) as [[s Esys]|ENoSysUnd].
+      {
+        destruct (syscall_ret_or_sig s sys_values stk h) as 
+          [ [tr [stk'' [h'' [dst_value Eret]]]]
+          | [sig [tr Esig]]
+          ].
+        {
+          generalize (eval_syscall_ret
+            p stk h fr f pc dst next tr sys_args sys_values sno s sno_value
+            dst_value stk'' h''
+            Hsys_args Hsno_reg Esys Hexec Eret
+          ); step_state.
+        }
+        {
+          generalize (eval_syscall_sig
+            p stk h fr f pc dst next tr sys_args sys_values sno s sno_value sig
+            Hsys_args Hsno_reg Esys Hexec Esig
+          ); step_state.
+        }
+      }
+      {
+        destruct ENoSysUnd as [ENoSys|EUnd].
+        {
+          generalize (eval_syscall_nosys
+            p stk h fr f pc dst next [] sys_args sys_values sno sno_value
+            Hsys_args Hsno_reg ENoSys Hexec
+          ); step_state.
+        }
+        {
+          generalize (eval_syscall_und_enosys
+            p stk h fr f pc dst next [] sys_args sys_values sno sno_value
+          ); step_state.
+        }
+      }
+    }
+    {
+      destruct dst as [dst|].
+      {
+        idtac.
+      }
+      {
+        idtac.
+      }
+    }
+    {
+      destruct dst as [dst|].
+      {
+        idtac.
+      }
+      {
+        idtac.
+      }
+    }
+    {
+      idtac.
+    }
+    {
+      idtac.
+    }
+    {
+      used_value f fr pc i addr addr_value Haddr Haddr_reg.
+      used_value f fr pc i value value_value Hvalue Hvalue_reg.
+      destruct (store_value_or_signal stk h addr_value value_value) as 
+        [ [h'' Evalue]
+        | [s Esig]
+        ].
+      {
+        generalize (eval_st_value
+          p stk h fr f pc next addr value addr_value value_value h''
+          Hexec Haddr Hvalue Evalue
+        ); step_state.
+      }
+      {
+        generalize (eval_st_sig
+          p stk h fr f pc next addr value addr_value s
+          Hexec Haddr Esig
+        ); step_state.
+      }
+    }
+    {
+      destruct value as [value|].
+      {
+        idtac.
+      }
+      {
+        idtac.
+      }
+    }
+    {
+      used_value f fr pc i cond cond_value Hcond Hcond_reg.
+      destruct (value_is_true_or_false cond_value) as [Et|Ef].
+      {
+        generalize (eval_jcc_true 
+          p stk h fr f pc cond bt bf cond_value
+          Hexec Hcond Et
+        ); step_state.
+      }
+      {
+        generalize (eval_jcc_false
+          p stk h fr f pc cond bt bf cond_value
+          Hexec Hcond Ef
+        ); step_state.
+      }
+    }
+    {
+      generalize (eval_jmp p stk h fr f pc target); step_state.
+    }
+    {
+      generalize (eval_trap p stk h fr f pc Hexec); step_state.
+    }
   }
-*)
 Admitted.
 
 Inductive star (p: prog): estate -> trace -> estate -> Prop :=

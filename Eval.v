@@ -32,6 +32,8 @@ Record frame := mkframe
   ; fr_pc: node
   }.
 
+Definition frame_map := PTrie.t frame.
+
 Record stack := mkstack
   { stk_fr: positive
   ; stk_frs: list positive
@@ -64,7 +66,15 @@ Section VALIDITY.
         (FUNC: Some f = p ! (fr.(fr_func)))
         (REACH: Reachable f (fr.(fr_pc)))
         (INST: Some i = f.(fn_insts) ! (fr.(fr_pc)))
-        (REGS: forall (r: reg), LiveAt f r (fr.(fr_pc)) -> exists (v: value), Some v = fr.(fr_regs) ! r),
+        (REGS:
+          forall (r: reg),
+            LiveAt f r (fr.(fr_pc)) ->
+            exists (v: value),
+              Some v = fr.(fr_regs) ! r)
+        (VALS:
+          forall (r: reg) (v: value),
+            Some v = fr.(fr_regs) ! r ->
+              exists (t: ty), Some t = (ty_env f) ! r /\ TypeOfValue v t),
         ValidFrame fr_id frames
     .
 
@@ -90,8 +100,6 @@ Definition set_frame (st: state) (fr: frame): state :=
    ; st_heap := st.(st_heap)
    |}.
 
-Axiom get_vreg: frame -> reg -> option value.
-
 Axiom set_vreg: frame -> reg -> value -> frame.
 
 Axiom set_pc: frame -> node -> frame.
@@ -101,6 +109,8 @@ Axiom set_vreg_pc: frame -> reg -> value -> node -> frame.
 Axiom step_binop: binop -> ty -> value -> value -> option value.
 
 Axiom step_unop: unop -> ty -> value -> option value.
+
+Axiom jump_to_phi: frame -> node -> frame.
 
 Axiom argext: ty -> value -> option value.
 
@@ -125,7 +135,7 @@ Definition step_inst (fr: frame) (st: state) (i: inst): option state :=
     Some (set_frame st fr')
 
   | LLUnop (ty, dst) next op arg =>
-    match get_vreg fr arg with
+    match fr.(fr_regs) ! arg with
     | Some varg =>
       match step_unop op ty varg with
       | Some r =>
@@ -137,9 +147,9 @@ Definition step_inst (fr: frame) (st: state) (i: inst): option state :=
     end
 
   | LLBinop (ty, dst) next op lhs rhs =>
-    match get_vreg fr lhs with
+    match fr.(fr_regs) ! lhs with
     | Some vl =>
-      match get_vreg fr rhs with
+      match fr.(fr_regs) ! rhs with
       | Some vr =>
         match step_binop op ty vl vr with
         | None => None
@@ -153,7 +163,7 @@ Definition step_inst (fr: frame) (st: state) (i: inst): option state :=
     end
 
   | LLJcc cond bt bf =>
-    match get_vreg fr cond with
+    match fr.(fr_regs) ! cond with
     | Some vc =>
       match is_true vc with
       | true =>

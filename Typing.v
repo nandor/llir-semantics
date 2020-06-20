@@ -8,7 +8,7 @@ Require Import Coq.ZArith.ZArith.
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 Require Import LLIR.Values.
-Require Export LLIR.Type.
+Require Export LLIR.Types.
 
 
 Definition type_env := PTrie.t ty.
@@ -157,6 +157,7 @@ Inductive WellTypedInst: type_env -> inst -> Prop :=
     forall (env: type_env) (next: node)
       (sno: reg) (args: list reg) (tsno: ty_int) (dst: reg)
       (SNO_TY: well_typed_reg env sno sys_no_ty)
+      (ARG_TY: forall (arg: reg), In arg args -> well_typed_reg env arg sys_arg_ty)
       (DST_TY: well_typed_reg env dst sys_ret_ty),
       WellTypedInst env (LLSyscall dst next sno args)
   | type_trap:

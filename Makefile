@@ -13,16 +13,17 @@ COQDEP=$(COQBIN)coqdep $(COQINCLUDES)
 PROOFS=\
 	Values.vo\
 	Maps.vo\
-	Type.vo\
+	Types.vo\
 	LLIR.vo\
 	Export.vo\
+	Syscall.vo\
+	Eval.vo\
 	SmallStep.vo\
 	Closure.vo\
 	Transform.vo\
 	Dom.vo\
 	Block.vo\
 	Liveness.vo\
-	Eval.vo\
 	Aliasing.vo\
 	Typing.vo\
 	SSA.vo\

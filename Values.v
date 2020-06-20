@@ -18,10 +18,12 @@ Module INT.
   Module Type VALUE.
     Parameter t: Type.
     Parameter is_zero: t -> bool.
+    Parameter bits: nat.
     Parameter zero: t.
     Parameter eq_dec: forall (x: t) (y: t), {x = y} + {x <> y}.
     Parameter zero_is_zero: is_zero zero = true.
     Parameter non_zero_is_not_zero: forall (x: t), x <> zero -> is_zero x = false.
+    Parameter to_nat: t -> nat.
   End VALUE.
 
   Module DOUBLE (BASE : VALUE).
@@ -29,8 +31,10 @@ Module INT.
 
     Definition is_zero v :=
       match v with
-      | (lo, hi) => BASE.is_zero lo && BASE.is_zero hi
+      | (hi, lo) => BASE.is_zero hi && BASE.is_zero lo
       end.
+
+    Definition bits := BASE.bits * 2.
 
     Definition zero: t := (BASE.zero, BASE.zero).
 
@@ -50,16 +54,21 @@ Module INT.
     Lemma non_zero_is_not_zero: forall (x: t), x <> zero -> is_zero x = false.
     Proof.
       intros x Hnz.
-      destruct x as [lo hi].
-      destruct (BASE.eq_dec lo BASE.zero); destruct (BASE.eq_dec hi BASE.zero);
+      destruct x as [hi lo].
+      destruct (BASE.eq_dec hi BASE.zero); destruct (BASE.eq_dec lo BASE.zero);
       unfold zero in Hnz; subst; try contradiction; simpl;
-      try rewrite <- (BASE.non_zero_is_not_zero hi);
       try rewrite <- (BASE.non_zero_is_not_zero lo);
-      try rewrite (BASE.non_zero_is_not_zero hi);
+      try rewrite <- (BASE.non_zero_is_not_zero hi);
       try rewrite (BASE.non_zero_is_not_zero lo);
+      try rewrite (BASE.non_zero_is_not_zero hi);
       try rewrite BASE.zero_is_zero;
       auto.
     Qed.
+
+    Definition to_nat (v: t) :=
+      match v with
+      | (hi, lo) => (BASE.to_nat hi) * Nat.pow 2 BASE.bits + BASE.to_nat lo
+      end.
   End DOUBLE.
 
   Module I1 <: VALUE.
@@ -73,6 +82,8 @@ Module INT.
 
     Definition zero: t := O.
 
+    Definition bits := 1.
+
     Lemma eq_dec: forall (x: t) (y: t), {x = y} + {x <> y}.
     Proof.
       intros x y.
@@ -84,6 +95,12 @@ Module INT.
 
     Lemma non_zero_is_not_zero: forall (x: t), x <> zero -> is_zero x = false.
     Proof. intros x Hnz; destruct x; [reflexivity|contradiction]. Qed.
+
+    Definition to_nat (v: t) :=
+      match v with
+      | I => 1
+      | O => 0
+      end.
   End I1.
 
   Module I2 := DOUBLE I1.
@@ -178,7 +195,7 @@ End INT.
 
 Inductive sym : Type :=
   (* Pointer to the program arguments. *)
-  | SInit (object: positive) (offset: positive)
+  | SInit (object: positive) (o3ffset: positive)
   (* Pointer into a stack frame *)
   | SFrame (frame: positive) (object: positive) (offset: nat)
   (* Pointer to a global data item *)

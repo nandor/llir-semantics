@@ -26,13 +26,14 @@ Inductive ty : Type :=
 Definition ptr_ty := TInt I64.
 Definition sys_no_ty := TInt I64.
 Definition sys_ret_ty := TInt I64.
+Definition sys_arg_ty := TInt I64.
 
 Lemma type_dec:
   forall (t0: ty) (t1: ty),
     {t0 = t1} + {t0 <> t1}.
 Proof.
   intros t0 t1.
-  destruct t0; destruct t1; 
+  destruct t0; destruct t1;
   try destruct i; try destruct i0;
   try destruct f; try destruct f0;
   match goal with
@@ -84,4 +85,12 @@ Proof.
   - destruct v; simpl in H; subst; constructor.
 Qed.
 
-
+(* Type of values *)
+Inductive TypeOfValue : value -> ty -> Prop :=
+  | type_of_val_int:
+    forall (v: INT.t) (t: ty) (TY: TypeOfInt v t), TypeOfValue (VInt v) t
+  | type_of_val_sym:
+    forall (s: sym), TypeOfValue (VSym s) ptr_ty
+  | type_of_val_und:
+    forall (t: ty), TypeOfValue VUnd t
+  .
