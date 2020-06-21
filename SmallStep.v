@@ -16,6 +16,8 @@ Require Import LLIR.Typing.
 Require Import LLIR.Signal.
 Require Import LLIR.Liveness.
 Require Import LLIR.Syscall.
+Require Import LLIR.Frame.
+Require Import LLIR.State.
 
 Import ListNotations.
 
@@ -25,6 +27,7 @@ Inductive estate: Type :=
   | State (stk: stack) (h: heap)
   | Exit (stk: frame_map) (h: heap)
   | Signal (stk: stack) (h: heap) (sig: signal)
+  | Broken
   .
 
 Inductive Normal: prog -> estate -> Prop :=
@@ -34,8 +37,8 @@ Inductive Normal: prog -> estate -> Prop :=
       (fr_id: positive) (frs: list positive) (frames: PTrie.t frame) (init: objects)
       (h: heap)
       (VP: valid_prog p)
-      (FR: ValidFrame p fr_id frames)
-      (FRS: forall (f: positive), In f frs -> ValidFrame p f frames),
+      (FR: ValidTopFrame p fr_id frames)
+      (FRS: forall (f: positive), In f frs -> ValidMidFrame p f frames),
       Normal p (State (mkstack fr_id frs frames init) h)
   .
 
@@ -64,7 +67,7 @@ Theorem valid_state_can_execute:
       Executing p stk fr f pc i.
 Proof.
   intros p h stk Hvalid.
-  inversion Hvalid; inversion FR.
+  inversion Hvalid; inversion FR; inversion VALID.
   exists fr; exists f; exists (fr_pc fr); exists i.
   apply (executing p fr_id frs frames init f fr i); auto.
 Qed.
@@ -83,7 +86,8 @@ Proof.
   inversion Hexec; subst; simpl; clear Hexec.
   inversion Hvalid; clear Hvalid; subst.
   inversion FR.
-  rewrite <- FRAME in FRAME0; inversion FRAME0 as [FRAME']; clear FRAME0;
+  rewrite <- FRAME in FRAME0; inversion FRAME0 as [FRAME']; clear FRAME0.
+  inversion VALID.
   rewrite FRAME' in FUNC0; simpl in FUNC0; rewrite <- FUNC in FUNC0;
   inversion FUNC0; clear FUNC0; subst f0 fr0 frames0 fr_id0.
   rewrite <- INST in INST0; inversion INST0 as [INST']; clear INST0; subst i0.
@@ -148,11 +152,17 @@ Inductive StoreVal: stack -> heap -> value -> value -> heap -> Prop :=
 Inductive StoreSig: stack -> heap -> value -> signal -> Prop :=
   .
 
-Lemma store_value_or_signal:
+(* Stores which break the program by overwriting code or stack *)
+Inductive StoreBreak: stack -> heap -> value -> Prop :=
+  .
+
+Lemma store_value_signal_break:
   forall (stk: stack) (h: heap) (addr: value) (v: value),
     (exists (h': heap), StoreVal stk h addr v h')
     \/
-    (exists (sig: signal), StoreSig stk h addr sig).
+    (exists (sig: signal), StoreSig stk h addr sig)
+    \/
+    StoreBreak stk h addr.
 Admitted.
 
 Inductive UnaryVal: value -> unop -> ty -> value -> Prop :=
@@ -294,6 +304,54 @@ Proof.
   inversion TY; constructor.
 Qed.
 
+Inductive ReturnToFrame
+  : prog ->
+    stack ->
+    positive ->
+    list positive -> 
+    inst ->
+    node ->
+    Prop :=
+  | return_to_frame:
+    forall
+      (p: prog)
+      (frames: PTrie.t frame) (init: objects) 
+      (top: positive) (next: positive) (rest: list positive)
+      (fr: frame) (f: func) (i: inst) (ret_pc: node)
+      (FRAME: Some fr = frames ! next)
+      (FUNC: Some f = p ! (fr.(fr_func)))
+      (INST: Some i = f.(fn_insts) ! (fr.(fr_pc)))
+      (SUCC: ReturnAddress i ret_pc),
+      ReturnToFrame
+        p
+        (mkstack top (next :: rest) frames init)
+        next
+        rest
+        i
+        ret_pc
+  .
+
+Inductive ReturnValue
+  : frame ->
+    option reg ->
+    ty ->
+    value ->
+    Prop :=
+  | return_none_und:
+    forall (fr: frame) (t: ty),
+      ReturnValue fr None t VUnd
+  | return_some_match:
+    forall (fr: frame) (arg: reg) (t: ty) (arg_value: value)
+      (ARG: Some arg_value = fr.(fr_regs) ! arg)
+      (TY: TypeOfValue arg_value t),
+      ReturnValue fr (Some arg) t arg_value
+  | return_some_und:
+    forall (fr: frame) (arg: reg) (t: ty) (arg_value: value)
+      (ARG: Some arg_value = fr.(fr_regs) ! arg)
+      (TY: ~TypeOfValue arg_value t),
+      ReturnValue fr (Some arg) t VUnd
+  .
+
 Inductive step (p: prog): estate -> trace -> estate -> Prop :=
   | eval_st_value:
     forall
@@ -322,6 +380,19 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
         (State stk h)
         []
         (Signal stk h sig)
+  | eval_st_break:
+    forall
+      (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
+      (next: node) (addr: reg) (arg: reg)
+      (addr_value: value)
+      (EXEC: Executing p stk fr f pc (LLSt next addr arg))
+      (ADDR: Some addr_value = fr.(fr_regs) ! addr)
+      (LOAD: StoreBreak stk h addr_value),
+      step
+        p
+        (State stk h)
+        []
+        Broken
   | eval_ld_value:
     forall
       (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
@@ -624,6 +695,64 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
         (State stk h)
         []
         (Signal stk h SIGILL)
+ | eval_ret_top:
+    forall
+      (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node) (value: option reg)
+      (EXEC: Executing p stk fr f pc (LLRet value))
+      (TOP: TopFrame stk),
+      step
+        p
+        (State stk h)
+        []
+        (Signal stk h SIGILL)
+  | eval_ret_void:
+    forall
+      (stk: stack) (h: heap) 
+      (fr: frame) (f: func) (pc: node) (value: option reg)
+       (rest: list positive) 
+      (i: inst) (callee: positive) (ret_pc: node)
+      (EXEC: Executing p stk fr f pc (LLRet value))
+      (NEXT: ReturnToFrame p stk callee rest i ret_pc)
+      (VOID: VoidCallSite i),
+      step
+        p
+        (State stk h)
+        []
+        (State
+          (jump_to_phi 
+            (mkstack
+              callee
+              rest
+              (stk_frames stk)
+              (stk_init stk))
+            ret_pc)
+          h)
+  | eval_ret_value:
+    forall
+      (stk: stack) (h: heap)
+      (fr: frame) (f: func) (pc: node) (v: option reg)
+      (rest: list positive) (i: inst) (callee: positive)
+      (t: ty) (dst: reg) (ret_pc: node) (ret_value: value)
+      (EXEC: Executing p stk fr f pc (LLRet v))
+      (NEXT: ReturnToFrame p stk callee rest i ret_pc)
+      (VOID: CallSite i t dst)
+      (RET: ReturnValue fr v t ret_value),
+      step
+        p
+        (State stk h)
+        []
+        (State
+          (jump_to_phi
+            (set_vreg 
+              (mkstack
+                callee
+                rest
+                (stk_frames stk)
+                (stk_init stk))
+              dst
+              ret_value)
+            ret_pc)
+          h)
   .
 
 Theorem well_typed_progress:
@@ -657,7 +786,7 @@ Proof.
       inversion Hwtf; inversion INSTS;
       apply INSTS0 with (n := (fr_pc fr)); auto.
     }
-    inversion Hvalids; subst fr_id frames.
+    inversion Hvalids; inversion VALID; subst fr_id frames p1 fr1.
     generalize (uses_are_defined p h stk f fr pc i Hv Hexec); intros Hval.
     rewrite H.
     rewrite <- H in Hstk'; inversion Hstk'; clear Hstk';
@@ -828,7 +957,7 @@ Proof.
         p f fr sys_args (ty_env f)
         FUNC ARG_TY REGS Hargs_live VALS
       ); intros [sys_values Hsys_args].
-      destruct (syscall_number_complete sno_value Hty_of) as [[s Esys]|ENoSysUnd].
+      destruct (syscall_number_complete sno_value Hty_of) as [[s Esys]|[ENoSys|EUnd]].
       {
         destruct (syscall_ret_or_sig s sys_values stk h) as 
           [ [tr [stk'' [h'' [dst_value Eret]]]]
@@ -849,18 +978,15 @@ Proof.
         }
       }
       {
-        destruct ENoSysUnd as [ENoSys|EUnd].
-        {
-          generalize (eval_syscall_nosys
-            p stk h fr f pc dst next [] sys_args sys_values sno sno_value
-            Hsys_args Hsno_reg ENoSys Hexec
-          ); step_state.
-        }
-        {
-          generalize (eval_syscall_und_enosys
-            p stk h fr f pc dst next [] sys_args sys_values sno sno_value
-          ); step_state.
-        }
+        generalize (eval_syscall_nosys
+          p stk h fr f pc dst next [] sys_args sys_values sno sno_value
+          Hsys_args Hsno_reg ENoSys Hexec
+        ); step_state.
+      }
+      {
+        generalize (eval_syscall_und_enosys
+          p stk h fr f pc dst next [] sys_args sys_values sno sno_value
+        ); step_state.
       }
     }
     {
@@ -890,9 +1016,9 @@ Proof.
     {
       used_value f fr pc i addr addr_value Haddr Haddr_reg.
       used_value f fr pc i value value_value Hvalue Hvalue_reg.
-      destruct (store_value_or_signal stk h addr_value value_value) as 
+      destruct (store_value_signal_break stk h addr_value value_value) as 
         [ [h'' Evalue]
-        | [s Esig]
+        | [ [s Esig]| Ebreak]
         ].
       {
         generalize (eval_st_value
@@ -906,14 +1032,63 @@ Proof.
           Hexec Haddr Esig
         ); step_state.
       }
+      {
+        generalize (eval_st_break 
+          p stk h fr f pc next addr value addr_value
+          Hexec Haddr Ebreak
+        ); step_state.
+      }
     }
     {
-      destruct value as [value|].
+      destruct (top_or_return stk) as [Htop|[vr [vrs Hret]]].
       {
-        idtac.
+        generalize (eval_ret_top p stk h fr f pc value Hexec Htop); step_state.
       }
       {
-        idtac.
+        inversion Hret as [frames init top ret frs H']; subst ret frs.
+        rewrite <- H in H'; inversion H'; subst top frames init.
+        assert (Hmvr: In vr stk_frs). { subst; left; auto. }
+        generalize (Hp' vr Hmvr); intros Hmid.
+        inversion Hmid; subst p1 fr_id frames.
+        rewrite H'; rewrite H.
+        assert (Hret_addr: exists (ret_pc: node), ReturnAddress i1 ret_pc).
+        {
+           destruct RETURN as [H''|[tr [dstr H'']]]; 
+           inversion H''; exists next; constructor.
+        }
+        destruct Hret_addr as [ret_pc Hret_pc].
+        assert (Hret_to_frame: ReturnToFrame p stk vr vrs i1 ret_pc).
+        {
+          subst stk stk_frs.
+          apply return_to_frame with fr0 f0; auto.
+        }
+        destruct RETURN as [Hvoid|[tr [dstr Hcall]]].
+        {
+          generalize (eval_ret_void 
+            p stk h fr f pc value vrs i1 vr ret_pc
+            Hexec Hret_to_frame Hvoid
+          ); step_state.
+        }
+        {
+          assert (Hrv: exists v, ReturnValue fr value tr v).
+          {
+            destruct value as [arg|] eqn:Evalue.
+            {
+              used_value f fr pc i arg arg_value Harg Harg_reg.
+              destruct (TypeOfValue_dec arg_value tr).
+              { exists arg_value; constructor; auto. }
+              { exists VUnd; apply return_some_und with arg_value; auto. }
+            }
+            {
+              exists VUnd; constructor.
+            }
+          }
+          destruct Hrv as [ret_value Hret_value].
+          generalize (eval_ret_value 
+            p stk h fr f pc value vrs i1 vr tr dstr ret_pc ret_value
+            Hexec Hret_to_frame Hcall Hret_value
+          ); step_state.
+        }
       }
     }
     {

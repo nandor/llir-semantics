@@ -15,6 +15,8 @@ PROOFS=\
 	Maps.vo\
 	Types.vo\
 	LLIR.vo\
+	Frame.vo\
+	State.vo\
 	Export.vo\
 	Syscall.vo\
 	Eval.vo\

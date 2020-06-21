@@ -9,85 +9,13 @@ Require Import Coq.Init.Nat.
 Require Import LLIR.LLIR.
 Require Import LLIR.Maps.
 Require Import LLIR.Typing.
-Require Import LLIR.Liveness.
 Require Import LLIR.Dom.
+Require Import LLIR.Frame.
+Require Import LLIR.State.
 
 Import ListNotations.
 
 
-
-Record object := mkdata
-  { dt_size: positive
-  ; dt_align: positive
-  ; dt_data: PTrie.t quad
-  }.
-
-Definition objects := PTrie.t object.
-
-Record frame := mkframe
-  { fr_data: objects
-  ; fr_regs: PTrie.t value
-  ; fr_args: list value
-  ; fr_func: name
-  ; fr_pc: node
-  }.
-
-Definition frame_map := PTrie.t frame.
-
-Record stack := mkstack
-  { stk_fr: positive
-  ; stk_frs: list positive
-  ; stk_frames: PTrie.t frame
-  ; stk_init: objects
-  }.
-
-Record heap := mkheap
-  { hp_segments: PTrie.t objects
-  }.
-
-Record state := mkstate
-  { st_stack: stack
-  ; st_heap: heap
-  }.
-
-
-Definition trace := list (positive * list value).
-
-Section VALIDITY.
-  Variable p: prog.
-
-  Inductive ValidFrame: positive -> PTrie.t frame -> Prop :=
-    | valid_frame:
-      forall
-        (fr_id: positive) (frames: PTrie.t frame)
-        (data: objects) (args: PTrie.t value)
-        (f: func) (i: inst) (fr: frame)
-        (FRAME: Some fr = frames ! fr_id)
-        (FUNC: Some f = p ! (fr.(fr_func)))
-        (REACH: Reachable f (fr.(fr_pc)))
-        (INST: Some i = f.(fn_insts) ! (fr.(fr_pc)))
-        (REGS:
-          forall (r: reg),
-            LiveAt f r (fr.(fr_pc)) ->
-            exists (v: value),
-              Some v = fr.(fr_regs) ! r)
-        (VALS:
-          forall (r: reg) (v: value),
-            Some v = fr.(fr_regs) ! r ->
-              exists (t: ty), Some t = (ty_env f) ! r /\ TypeOfValue v t),
-        ValidFrame fr_id frames
-    .
-
-  Inductive ValidState: state -> Prop :=
-    | valid_state:
-      forall
-        (fr_id: positive) (frs: list positive) (frames: PTrie.t frame) (init: objects)
-        (h: heap)
-        (FR: ValidFrame fr_id frames)
-        (FRS: forall (f: positive), In f frs -> ValidFrame f frames),
-        ValidState (mkstate (mkstack fr_id frs frames init) h)
-    .
-End VALIDITY.
 
 Definition set_frame (st: state) (fr: frame): state :=
   let stk := st.(st_stack) in

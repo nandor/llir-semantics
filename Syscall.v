@@ -10,6 +10,8 @@ Require Import LLIR.Eval.
 Require Import LLIR.Maps.
 Require Import LLIR.Signal.
 Require Import LLIR.Types.
+Require Import LLIR.Frame.
+Require Import LLIR.State.
 
 Import ListNotations.
 

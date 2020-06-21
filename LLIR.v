@@ -429,6 +429,33 @@ Inductive Terminator: inst -> Prop :=
       Terminator (LLInvoke dst next callee args exn)
   .
 
+Inductive VoidCallSite: inst -> Prop :=
+  | void_site_call:
+    forall (next: node) (callee: reg) (args: list reg),
+      VoidCallSite (LLCall None next callee args)
+  | void_site_invoke:
+    forall (next: node) (callee: reg) (args: list reg) (exn: node),
+      VoidCallSite (LLInvoke None next callee args exn)
+  .
+
+Inductive CallSite: inst -> ty -> reg -> Prop :=
+  | call_site_call:
+    forall (t: ty) (dst: reg) (next: node) (callee: reg) (args: list reg),
+      CallSite (LLCall (Some (t, dst)) next callee args) t dst
+  | call_site_invoke:
+    forall (t: ty) (dst: reg) (next: node) (callee: reg) (args: list reg) (exn: node),
+      CallSite (LLInvoke (Some (t, dst)) next callee args exn) t dst
+  .
+
+Inductive ReturnAddress: inst -> node -> Prop :=
+  | ret_addr_call:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg),
+      ReturnAddress (LLCall dst next callee args) next
+  | ret_addr_invoke:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: node),
+      ReturnAddress (LLInvoke dst next callee args exn) next
+  .
+
 Lemma is_terminator_terminator:
   forall (i: inst),
     is_terminator i = true <-> Terminator i.

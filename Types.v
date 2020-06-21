@@ -94,3 +94,20 @@ Inductive TypeOfValue : value -> ty -> Prop :=
   | type_of_val_und:
     forall (t: ty), TypeOfValue VUnd t
   .
+
+(* Decidability of TypeOfValue *)
+Lemma TypeOfValue_dec:
+  forall (v: value) (t: ty),
+    {TypeOfValue v t} + {~TypeOfValue v t}.
+Proof.
+  intros v t; destruct v.
+  - destruct (TypeOfInt_dec v t).
+    + left; constructor; auto.
+    + right; intros contra; inversion contra; contradiction.
+  - destruct t.
+    + destruct i;
+      try (left; constructor);
+      right; intros contra; inversion contra.
+    + right; intros contra; inversion contra.
+  - left; constructor.
+Qed.
