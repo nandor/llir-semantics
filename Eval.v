@@ -22,6 +22,7 @@ Definition set_frame (st: state) (fr: frame): state :=
   {| st_stack :=
     {| stk_fr := stk.(stk_fr)
      ; stk_frs := stk.(stk_frs)
+     ; stk_next := stk.(stk_next)
      ; stk_frames := PTrie.set stk.(stk_frames) stk.(stk_fr) fr
      ; stk_init := stk.(stk_init)
      |}
@@ -43,6 +44,8 @@ Axiom jump_to_phi: frame -> node -> frame.
 Axiom argext: ty -> value -> option value.
 
 Axiom load_from_object: objects -> positive -> positive -> ty -> option value.
+
+Axiom create_frame: func -> objects.
 
 Definition step_inst (fr: frame) (st: state) (i: inst): option state :=
   match i with

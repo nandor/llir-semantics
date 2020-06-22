@@ -34,12 +34,13 @@ Inductive Normal: prog -> estate -> Prop :=
   | normal_state:
     forall
       (p: prog)
-      (fr_id: positive) (frs: list positive) (frames: PTrie.t frame) (init: objects)
+      (fr_id: positive) (frs: list positive) 
+      (next: positive) (frames: PTrie.t frame) (init: objects)
       (h: heap)
       (VP: valid_prog p)
       (FR: ValidTopFrame p fr_id frames)
       (FRS: forall (f: positive), In f frs -> ValidMidFrame p f frames),
-      Normal p (State (mkstack fr_id frs frames init) h)
+      Normal p (State (mkstack fr_id frs next frames init) h)
   .
 
 Inductive Final: estate -> Prop :=
@@ -52,12 +53,13 @@ Inductive Executing: prog -> stack -> frame -> func -> node -> inst -> Prop :=
   | executing:
     forall
       (p: prog)
-      (fr_id: positive) (frs: list positive) (frames: PTrie.t frame) (init: objects)
+      (fr_id: positive) (frs: list positive) 
+      (next: positive) (frames: PTrie.t frame) (init: objects)
       (f: func) (fr: frame) (i: inst)
       (FRAME: Some fr  = frames ! fr_id)
       (FUNC: Some f = p ! (fr.(fr_func)))
       (INST: Some i = (f.(fn_insts)) ! (fr.(fr_pc))),
-      Executing p (mkstack fr_id frs frames init) fr f (fr.(fr_pc)) i
+      Executing p (mkstack fr_id frs next frames init) fr f (fr.(fr_pc)) i
   .
 
 Theorem valid_state_can_execute:
@@ -69,7 +71,7 @@ Proof.
   intros p h stk Hvalid.
   inversion Hvalid; inversion FR; inversion VALID.
   exists fr; exists f; exists (fr_pc fr); exists i.
-  apply (executing p fr_id frs frames init f fr i); auto.
+  apply (executing p fr_id frs next frames init f fr i); auto.
 Qed.
 
 Theorem uses_are_defined:
@@ -109,6 +111,7 @@ Qed.
 Definition update_frame (stk: stack) (fn: frame -> frame): stack :=
   {| stk_fr := stk.(stk_fr)
    ; stk_frs := stk.(stk_frs)
+   ; stk_next := stk.(stk_next)
    ; stk_frames := PTrie.update fn stk.(stk_frames) stk.(stk_fr)
    ; stk_init := stk.(stk_init)
    |}.
@@ -199,31 +202,18 @@ Admitted.
 
 Inductive Argument: frame -> nat -> ty -> value -> Prop :=
   | arg_int:
-    forall (fr: frame) (idx: nat) (t: ty) (v: INT.t)
-      (ARG: Some (VInt v) = nth_error fr.(fr_args) idx)
-      (TY: TypeOfInt v t),
-      Argument fr idx t (VInt v)
-  | arg_sym:
-    forall (fr: frame) (idx: nat) (s: sym)
-      (ARG: Some (VSym s) = nth_error fr.(fr_args) idx),
-      Argument fr idx ptr_ty (VSym s)
-  | arg_und:
-    forall (fr: frame) (idx: nat) (t: ty)
-      (ARG: Some VUnd = nth_error fr.(fr_args) idx),
-      Argument fr idx t VUnd
+    forall (fr: frame) (idx: nat) (t: ty) (v: value)
+      (ARG: Some v = nth_error fr.(fr_args) idx)
+      (TY: TypeOfValue v t),
+      Argument fr idx t v
   | arg_err:
     forall (fr: frame) (idx: nat) (t: ty)
       (ARG: None = nth_error fr.(fr_args) idx),
       Argument fr idx t VUnd
-  | arg_und_int:
-    forall (fr: frame) (idx: nat) (t: ty) (v: INT.t)
-      (ARG: Some (VInt v) = nth_error fr.(fr_args) idx)
-      (TY: ~TypeOfInt v t),
-      Argument fr idx t VUnd
-  | arg_und_sym:
-    forall (fr: frame) (idx: nat) (t: ty) (s: sym)
-      (ARG: Some (VSym s) = nth_error fr.(fr_args) idx)
-      (TY: t <> ptr_ty),
+  | arg_und:
+    forall (fr: frame) (idx: nat) (t: ty) (v: value)
+      (ARG: Some v = nth_error fr.(fr_args) idx)
+      (TY: ~TypeOfValue v t),
       Argument fr idx t VUnd
   .
 
@@ -245,20 +235,9 @@ Proof.
   intros fr idx t; destruct fr.
   destruct (nth_error fr_args idx) as [arg|] eqn:Earg.
   {
-    destruct arg.
-    {
-      destruct (TypeOfInt_dec v t) as [Eq|Ne].
-      + exists (VInt v); constructor; simpl; auto.
-      + exists VUnd; apply arg_und_int with v; simpl; auto.
-    }
-    {
-      destruct (type_dec t ptr_ty).
-      - exists (VSym s); subst t; apply arg_sym; simpl; auto.
-      - exists VUnd; apply arg_und_sym with s; auto.
-    }
-    {
-      exists VUnd; constructor; simpl; auto.
-    }
+    destruct (TypeOfValue_dec arg t) as [Eq|Ne].
+    { exists arg; constructor; auto. }
+    { exists VUnd. apply arg_und with arg; auto. }
   }
   {
     exists VUnd; apply arg_err; simpl; auto.
@@ -315,7 +294,8 @@ Inductive ReturnToFrame
   | return_to_frame:
     forall
       (p: prog)
-      (frames: PTrie.t frame) (init: objects) 
+      (next_id: positive)
+      (next: positive) (frames: PTrie.t frame) (init: objects) 
       (top: positive) (next: positive) (rest: list positive)
       (fr: frame) (f: func) (i: inst) (ret_pc: node)
       (FRAME: Some fr = frames ! next)
@@ -324,7 +304,7 @@ Inductive ReturnToFrame
       (SUCC: ReturnAddress i ret_pc),
       ReturnToFrame
         p
-        (mkstack top (next :: rest) frames init)
+        (mkstack top (next :: rest) next_id frames init)
         next
         rest
         i
@@ -351,6 +331,44 @@ Inductive ReturnValue
       (TY: ~TypeOfValue arg_value t),
       ReturnValue fr (Some arg) t VUnd
   .
+
+Inductive CallArgs : frame -> list reg -> list value -> Prop :=
+  | arg_vals_nil:
+    forall
+      (fr: frame),
+      CallArgs fr [] []
+  | arg_vals_cons:
+    forall
+      (fr: frame)
+      (arg_value: value) (arg_values: list value)
+      (arg: reg) (args: list reg)
+      (VALUE: Some arg_value = fr.(fr_regs) ! arg)
+      (TAIL: CallArgs fr args arg_values),
+      CallArgs fr (arg::args) (arg_value::arg_values)
+  .
+
+Lemma call_args:
+  forall 
+    (p: prog) (f: func)
+    (fr: frame) (args: list reg),
+    (Some f = p ! (fr_func fr)) ->
+    (forall (arg: reg),
+      LiveAt f arg (fr_pc fr) ->
+      exists (v: value), Some v = (fr_regs fr) ! arg) ->
+    (forall (arg: reg),
+      In arg args ->
+      LiveAt f arg (fr_pc fr)) ->
+    exists (values: list value), CallArgs fr args values.
+Proof.
+  intros p f fr args Hfn Hval Hlive.
+  induction args; [exists []; constructor|].
+  assert (Hin: In a (a :: args)). { left; auto. }
+  destruct (Hval a (Hlive a Hin)) as [v Hv].
+  assert (Hlive': forall arg, In arg args -> LiveAt f arg (fr_pc fr)).
+  { intros arg Hin'. apply Hlive. right. auto. }
+  destruct (IHargs Hlive') as [values Hvalues].
+  exists (v::values); constructor; auto.
+Qed.
 
 Inductive step (p: prog): estate -> trace -> estate -> Prop :=
   | eval_st_value:
@@ -723,6 +741,7 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
             (mkstack
               callee
               rest
+              (stk_next stk)
               (stk_frames stk)
               (stk_init stk))
             ret_pc)
@@ -735,7 +754,7 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
       (t: ty) (dst: reg) (ret_pc: node) (ret_value: value)
       (EXEC: Executing p stk fr f pc (LLRet v))
       (NEXT: ReturnToFrame p stk callee rest i ret_pc)
-      (VOID: CallSite i t dst)
+      (SITE: CallSite i t dst)
       (RET: ReturnValue fr v t ret_value),
       step
         p
@@ -747,11 +766,151 @@ Inductive step (p: prog): estate -> trace -> estate -> Prop :=
               (mkstack
                 callee
                 rest
+                (stk_next stk)
                 (stk_frames stk)
                 (stk_init stk))
               dst
               ret_value)
             ret_pc)
+          h)
+  | eval_call_broken:
+    forall
+      (stk: stack) (h: heap) (fr: frame) (f: func) (pc: node)
+      (i: inst) (callee: reg) (callee_value: value)
+      (EXEC: Executing p stk fr f pc i)
+      (CALLEE: Callee i callee)
+      (COND: Some callee_value = fr.(fr_regs) ! callee)
+      (FUNC: ~Function callee_value),
+      step
+        p
+        (State stk h)
+        []
+        Broken
+  | eval_tcall:
+    forall
+      (stk: stack) (h: heap)
+      (stk_fr: positive) (stk_frs: list positive) (stk_next: positive)
+      (stk_frames: PTrie.t frame) (stk_init: objects)
+      (fr: frame) (f: func) (pc: node) (callee: reg)
+      (callee_func: name) (callee_f: func)
+      (args: list reg) (arg_values: list value)
+      (EXEC: Executing p stk fr f pc (LLTCall callee args))
+      (CALEE: Some (VSym (SFunc callee_func)) = fr.(fr_regs) ! callee)
+      (FUNC: Some callee_f = p ! callee_func)
+      (ARGS: CallArgs fr args arg_values),
+      step
+        p
+        (State (mkstack stk_fr stk_frs stk_next stk_frames stk_init) h)
+        []
+        (State
+          (mkstack
+            stk_next
+            stk_frs
+            (Pos.succ stk_next)
+            (PTrie.set (PTrie.remove stk_frames stk_fr) stk_next
+              (mkframe
+                (create_frame callee_f)
+                PTrie.empty
+                arg_values
+                callee_func
+                callee_f.(fn_entry)
+                ))
+            stk_init)
+          h)
+  | eval_tinvoke:
+    forall
+      (stk: stack) (h: heap)
+      (stk_fr: positive) (stk_frs: list positive) (stk_next: positive)
+      (stk_frames: PTrie.t frame) (stk_init: objects)
+      (fr: frame) (f: func) (pc: node) (callee: reg) (exn: node)
+      (callee_func: name) (callee_f: func)
+      (args: list reg) (arg_values: list value)
+      (EXEC: Executing p stk fr f pc (LLTInvoke callee args exn))
+      (CALEE: Some (VSym (SFunc callee_func)) = fr.(fr_regs) ! callee)
+      (FUNC: Some callee_f = p ! callee_func)
+      (ARGS: CallArgs fr args arg_values),
+      step
+        p
+        (State (mkstack stk_fr stk_frs stk_next stk_frames stk_init) h)
+        []
+        (State
+          (mkstack
+            stk_next
+            stk_frs
+            (Pos.succ stk_next)
+            (PTrie.set (PTrie.remove stk_frames stk_fr) stk_next
+              (mkframe
+                (create_frame callee_f)
+                PTrie.empty
+                arg_values
+                callee_func
+                callee_f.(fn_entry)
+                ))
+            stk_init)
+          h)
+  | eval_call:
+    forall
+      (stk: stack) (h: heap)
+      (stk_fr: positive) (stk_frs: list positive) (stk_next: positive)
+      (stk_frames: PTrie.t frame) (stk_init: objects)
+      (fr: frame) (f: func) (pc: node) (callee: reg) 
+      (next: node) (dst: option (ty * reg))
+      (callee_func: name) (callee_f: func)
+      (args: list reg) (arg_values: list value)
+      (EXEC: Executing p stk fr f pc (LLCall dst next callee args))
+      (CALEE: Some (VSym (SFunc callee_func)) = fr.(fr_regs) ! callee)
+      (FUNC: Some callee_f = p ! callee_func)
+      (ARGS: CallArgs fr args arg_values),
+      step
+        p
+        (State (mkstack stk_fr stk_frs stk_next stk_frames stk_init) h)
+        []
+        (State
+          (mkstack
+            stk_next
+            (stk_fr :: stk_frs)
+            (Pos.succ stk_next)
+            (PTrie.set (PTrie.remove stk_frames stk_fr) stk_next
+              (mkframe
+                (create_frame callee_f)
+                PTrie.empty
+                arg_values
+                callee_func
+                callee_f.(fn_entry)
+                ))
+            stk_init)
+          h)
+  | eval_invoke:
+    forall
+      (stk: stack) (h: heap)
+      (stk_fr: positive) (stk_frs: list positive) (stk_next: positive)
+      (stk_frames: PTrie.t frame) (stk_init: objects)
+      (fr: frame) (f: func) (pc: node) (callee: reg)
+      (next: node) (dst: option (ty * reg)) (exn: node)
+      (callee_func: name) (callee_f: func)
+      (args: list reg) (arg_values: list value)
+      (EXEC: Executing p stk fr f pc (LLInvoke dst next callee args exn))
+      (CALEE: Some (VSym (SFunc callee_func)) = fr.(fr_regs) ! callee)
+      (FUNC: Some callee_f = p ! callee_func)
+      (ARGS: CallArgs fr args arg_values),
+      step
+        p
+        (State (mkstack stk_fr stk_frs stk_next stk_frames stk_init) h)
+        []
+        (State
+          (mkstack
+            stk_next
+            (stk_fr :: stk_frs)
+            (Pos.succ stk_next)
+            (PTrie.set (PTrie.remove stk_frames stk_fr) stk_next
+              (mkframe
+                (create_frame callee_f)
+                PTrie.empty
+                arg_values
+                callee_func
+                callee_f.(fn_entry)
+                ))
+            stk_init)
           h)
   .
 
@@ -769,11 +928,11 @@ Proof.
     generalize (valid_state_can_execute p h stk Hv);
     intros [fr [f [pc [i Hexec]]]]; subst.
     inversion Hv as [
-        p' stk_fr stk_frs stk_frames stk_init
-        h' Hvalid Hvalids Hp' Hstk
-    ]; subst p'.
+        p' stk_fr stk_frs stk_next stk_frames stk_init
+        h' Hvalid Hvalid_top Hvalid_mid Hp' Hstk
+    ]; subst p' h'.
     inversion Hexec as [
-        p'' stk_fr' stk_frs' stk_frames'' stk_init''
+        p'' stk_fr' stk_frs' stk_next' stk_frames'' stk_init''
         func' frame' i''
         FRAME' FUNC' INST' Hp'' Hstk' Hinst Hfunc' Epc Hi''
     ]; subst i'' func' frame' p''.
@@ -786,13 +945,13 @@ Proof.
       inversion Hwtf; inversion INSTS;
       apply INSTS0 with (n := (fr_pc fr)); auto.
     }
-    inversion Hvalids; inversion VALID; subst fr_id frames p1 fr1.
+    inversion Hvalid_top; inversion VALID; subst fr_id frames p0 p1 fr1.
     generalize (uses_are_defined p h stk f fr pc i Hv Hexec); intros Hval.
-    rewrite H.
-    rewrite <- H in Hstk'; inversion Hstk'; clear Hstk';
-    subst stk_fr' stk_frs' stk_frames'' stk_init''.
+    rewrite <- Hstk in Hstk'; inversion Hstk'; clear Hstk';
+    subst stk_fr' stk_frs' stk_frames'' stk_init'' stk_next'.
     rewrite <- FRAME in FRAME'; inversion FRAME'; subst fr0.
     rewrite <- FUNC in FUNC'; inversion FUNC'; subst f0.
+    rewrite Hstk.
 
     Ltac used_value f fr pc i sym sym_val Hsym Hreg :=
       match goal with
@@ -812,6 +971,38 @@ Proof.
       | [ |- context [ step _ _ ?tr ?state ] ] => exists tr; exists state; auto
       end.
 
+    Ltac used_args pc i args0 values Hvalues :=
+      match goal with
+      | [ REGS: context [ LiveAt ?f _ _ -> _ ]
+        , FUNC: Some ?f = ?p ! (fr_func ?fr)
+        |- _ ] =>
+          let H := fresh in
+          assert (H: forall arg, In arg args0 -> LiveAt f arg (fr_pc fr));
+            [ intros arg Hin;
+              apply live_at with (use := pc) (p := [pc]);
+              [ subst pc; constructor; auto
+              | intros def Hne Hin'; inversion Hin'; subst; contradiction
+              | apply used_at_inst; apply inst_used_at with i; subst i pc; 
+                auto; constructor; auto
+              ]
+            |];
+          destruct (call_args p f fr args0 FUNC REGS H) as [values Hvalues]
+      end.
+
+    Ltac used_callee h callee callee_value Hcallee_reg args0 :=
+      match goal with
+      | [ Hexec: Executing ?p ?stk ?fr ?f ?pc ?inst |- _ ] =>
+        destruct (Function_dec callee_value) as [Eq|Ne];
+          [|
+            assert (Hc: Callee inst callee); [constructor|];
+            symmetry in Hcallee_reg;
+            generalize (eval_call_broken 
+              p stk h fr f pc inst callee callee_value
+              Hexec Hc Hcallee_reg Ne
+            ); step_state
+          ]
+      end.
+
     destruct i eqn:Ei;
       try match goal with
       | [ dst: ty * reg |- _ ] => destruct dst as [t dst]
@@ -824,16 +1015,14 @@ Proof.
         generalize (eval_ld_value
           p stk h fr f pc dst t next addr
           addr_value dst_value Hexec Haddr Hload
-        ).
-        step_state.
+        ); step_state.
       }
       {
         destruct Hsig as [sig Hsig].
         generalize (eval_ld_sig
           p stk h fr f pc dst t next addr
           addr_value sig Hexec Haddr Hsig
-        ).
-        step_state.
+        ); step_state.
       }
     }
     {
@@ -841,8 +1030,7 @@ Proof.
       generalize (eval_arg
         p stk h fr f pc dst t next index dst_value
         Hexec Harg
-      ).
-      step_state.
+      ); step_state.
     }
     {
       generalize (eval_int p stk h fr f pc dst next value Hexec).
@@ -937,7 +1125,6 @@ Proof.
       ); step_state.
     }
     {
-      (* LLSyscall *)
       used_value f fr pc i sno sno_value Hsno Hsno_reg.
       symmetry in Hsno_reg.
       generalize (VALS sno sno_value Hsno_reg); intros [ty [Hty Hty_of]].
@@ -947,7 +1134,7 @@ Proof.
       rename args0 into sys_args.
       assert (Hargs_live: forall arg, In arg sys_args -> LiveAt f arg (fr_pc fr)).
       {
-        intros arg Hi3n.
+        intros arg Hin'.
         apply live_at with (use := pc) (p := [pc]).
         - subst pc; constructor; apply REACH.
         - intros def contra Hin; inversion Hin; subst; contradiction.
@@ -990,28 +1177,60 @@ Proof.
       }
     }
     {
-      destruct dst as [dst|].
-      {
-        idtac.
-      }
-      {
-        idtac.
-      }
+      used_value f fr pc i callee callee_value Hcallee Hcallee_reg.
+      used_callee h callee callee_value Hcallee_reg args0.
+      used_args pc i args0 values Hvalues.
+      inversion Eq as [func Hfunc]; subst callee_value.
+      generalize (FN_VALS callee func Hcallee); intros Hsome_func.
+      destruct (p ! func) as [callee_fn|] eqn:Efunc; try contradiction.
+      symmetry in Efunc.
+      generalize (eval_call
+        p stk h stk_fr stk_frs stk_next stk_frames stk_init
+        fr f pc callee next dst func callee_fn args0 values
+        Hexec Hcallee Efunc Hvalues
+      ); rewrite Hstk; step_state.
     }
     {
-      destruct dst as [dst|].
-      {
-        idtac.
-      }
-      {
-        idtac.
-      }
+      used_value f fr pc i callee callee_value Hcallee Hcallee_reg.
+      used_callee h callee callee_value Hcallee_reg args0.
+      used_args pc i args0 values Hvalues.
+      inversion Eq as [func Hfunc]; subst callee_value.
+      generalize (FN_VALS callee func Hcallee); intros Hsome_func.
+      destruct (p ! func) as [callee_fn|] eqn:Efunc; try contradiction.
+      symmetry in Efunc.
+      generalize (eval_invoke
+        p stk h stk_fr stk_frs stk_next stk_frames stk_init
+        fr f pc callee next dst exn func callee_fn args0 values
+        Hexec Hcallee Efunc Hvalues
+      ); rewrite Hstk; step_state.
     }
     {
-      idtac.
+      used_value f fr pc i callee callee_value Hcallee Hcallee_reg.
+      used_callee h callee callee_value Hcallee_reg args0.
+      used_args pc i args0 values Hvalues.
+      inversion Eq as [fn Hfn]. rewrite <- Hfn in Hcallee.
+      generalize (FN_VALS callee fn Hcallee); intros Hfn_not_none.
+      destruct (p ! fn) as [func|] eqn:Efunc; try contradiction.
+      symmetry in Efunc.
+      generalize (eval_tcall 
+        p stk h stk_fr stk_frs stk_next stk_frames stk_init fr f
+        pc callee fn func args0 values Hexec Hcallee Efunc Hvalues).
+      rewrite Hstk.
+      step_state.
     }
     {
-      idtac.
+      used_value f fr pc i callee callee_value Hcallee Hcallee_reg.
+      used_callee h callee callee_value Hcallee_reg args0.
+      used_args pc i args0 values Hvalues.
+      inversion Eq as [fn Hfn]. rewrite <- Hfn in Hcallee.
+      generalize (FN_VALS callee fn Hcallee); intros Hfn_not_none.
+      destruct (p ! fn) as [func|] eqn:Efunc; try contradiction.
+      symmetry in Efunc.
+      generalize (eval_tinvoke 
+        p stk h stk_fr stk_frs stk_next stk_frames stk_init fr f
+        pc callee exn fn func args0 values Hexec Hcallee Efunc Hvalues).
+      rewrite Hstk.
+      step_state.
     }
     {
       used_value f fr pc i addr addr_value Haddr Haddr_reg.
@@ -1045,12 +1264,12 @@ Proof.
         generalize (eval_ret_top p stk h fr f pc value Hexec Htop); step_state.
       }
       {
-        inversion Hret as [frames init top ret frs H']; subst ret frs.
-        rewrite <- H in H'; inversion H'; subst top frames init.
+        inversion Hret as [next frames init top ret frs H']; subst ret frs.
+        rewrite <- Hstk in H'; inversion H'; subst top frames init next.
         assert (Hmvr: In vr stk_frs). { subst; left; auto. }
-        generalize (Hp' vr Hmvr); intros Hmid.
-        inversion Hmid; subst p1 fr_id frames.
-        rewrite H'; rewrite H.
+        generalize (Hvalid_mid vr Hmvr); intros Hmid.
+        inversion Hmid. subst p0 fr_id frames.
+        rewrite H'; rewrite Hstk.
         assert (Hret_addr: exists (ret_pc: node), ReturnAddress i1 ret_pc).
         {
            destruct RETURN as [H''|[tr [dstr H'']]]; 
@@ -1059,8 +1278,7 @@ Proof.
         destruct Hret_addr as [ret_pc Hret_pc].
         assert (Hret_to_frame: ReturnToFrame p stk vr vrs i1 ret_pc).
         {
-          subst stk stk_frs.
-          apply return_to_frame with fr0 f0; auto.
+          subst stk stk_frs; apply return_to_frame with fr0 f0; auto.
         }
         destruct RETURN as [Hvoid|[tr [dstr Hcall]]].
         {
@@ -1114,7 +1332,10 @@ Proof.
       generalize (eval_trap p stk h fr f pc Hexec); step_state.
     }
   }
-Admitted.
+  { inversion Hv. }
+  { inversion Hv. }
+  { inversion Hv. }
+Qed.
 
 Inductive star (p: prog): estate -> trace -> estate -> Prop :=
   | star_refl:

@@ -429,6 +429,21 @@ Inductive Terminator: inst -> Prop :=
       Terminator (LLInvoke dst next callee args exn)
   .
 
+Inductive Callee: inst -> reg -> Prop :=
+  | callee_call:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg),
+      Callee (LLCall dst next callee args) callee
+  | callee_invoke:
+    forall (dst: option (ty * reg)) (next: node) (callee: reg) (args: list reg) (exn: node),
+      Callee (LLInvoke dst next callee args exn) callee
+  | callee_tcall:
+    forall (callee: reg) (args: list reg),
+      Callee (LLTCall callee args) callee
+  | callee_tinvoke:
+    forall (callee: reg) (args: list reg) (exn: node),
+      Callee (LLTInvoke callee args exn) callee
+  .
+
 Inductive VoidCallSite: inst -> Prop :=
   | void_site_call:
     forall (next: node) (callee: reg) (args: list reg),

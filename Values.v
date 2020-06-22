@@ -241,3 +241,17 @@ Proof.
   - left; constructor.
   - right; constructor.
 Qed.
+
+Inductive Function: value -> Prop :=
+  | function: forall (f: name), Function (VSym (SFunc f))
+  .
+
+Lemma Function_dec:
+  forall (v: value),
+    {Function v} + {~Function v}.
+Proof.
+  destruct v.
+  - right; intros contra; inversion contra.
+  - destruct s; try (left; constructor); right; intros contra; inversion contra.
+  - right; intros contra; inversion contra.
+Qed.

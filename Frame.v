@@ -39,6 +39,7 @@ Definition frame_map := PTrie.t frame.
 Record stack := mkstack
   { stk_fr: positive
   ; stk_frs: list positive
+  ; stk_next: positive
   ; stk_frames: PTrie.t frame
   ; stk_init: objects
   }.
@@ -46,16 +47,17 @@ Record stack := mkstack
 Inductive TopFrame: stack -> Prop :=
   | top_frame:
     forall
-      (frames: PTrie.t frame) (init: objects) (top: positive),
-      TopFrame (mkstack top [] frames init)
+      (next: positive) (frames: PTrie.t frame) (init: objects) (top: positive),
+      TopFrame (mkstack top [] next frames init)
   .
 
 Inductive ReturnFrame: stack -> positive -> list positive -> Prop :=
   | return_frame:
     forall 
-      (frames: PTrie.t frame) (init: objects) (top: positive) (ret: positive)
+      (next: positive) (frames: PTrie.t frame) (init: objects) 
+      (top: positive) (ret: positive)
       (frs: list positive),
-      ReturnFrame (mkstack top (ret :: frs) frames init) ret frs
+      ReturnFrame (mkstack top (ret :: frs) next frames init) ret frs
   .
 
 Lemma top_or_return:
@@ -71,7 +73,7 @@ Proof.
   - right; exists p; exists stk_frs'; constructor.
 Qed.
 
-Inductive ValidFrame: prog -> frame -> Prop :=
+Inductive ValidFrame : prog -> frame -> Prop :=
   | valid_frame:
     forall
       (p: prog) (fr: frame)
@@ -86,9 +88,45 @@ Inductive ValidFrame: prog -> frame -> Prop :=
           LiveAt f r (fr.(fr_pc)) ->
           exists (v: value),
             Some v = fr.(fr_regs) ! r)
+      (FN_VALS:
+        forall (r: reg) (fn: name),
+          Some (VSym (SFunc fn)) = fr.(fr_regs) ! r -> p ! fn <> None)
       (VALS:
         forall (r: reg) (v: value),
           Some v = fr.(fr_regs) ! r ->
             exists (t: ty), Some t = (ty_env f) ! r /\ TypeOfValue v t),
       ValidFrame p fr
+  .
+
+Inductive ValidTopFrame : prog -> positive -> frame_map -> Prop :=
+  | valid_top_frame:
+    forall
+      (p: prog) (fr_id: positive) (frames: frame_map) (fr: frame)
+      (FRAME: Some fr = frames ! fr_id)
+      (VALID: ValidFrame p fr),
+      ValidTopFrame p fr_id frames
+  .
+
+Inductive ValidMidFrame : prog -> positive -> frame_map -> Prop :=
+  | valid_mid_frame:
+    forall
+      (p: prog) (fr_id: positive) (frames: frame_map) (fr: frame) 
+      (i: inst) (f: func)
+      (FRAME: Some fr = frames ! fr_id)
+      (VALID: ValidFrame p fr)
+      (FUNC: Some f = p ! (fr.(fr_func)))
+      (EXEC: Some i = f.(fn_insts) ! (fr.(fr_pc)))
+      (RETURN: VoidCallSite i \/ (exists (t: ty) (dst: reg), CallSite i t dst)),
+      ValidMidFrame p fr_id frames
+  .
+
+Inductive ValidStack : prog -> stack -> Prop :=
+  | valid_stack:
+    forall
+      (p: prog)
+      (fr_id: positive) (frs: list positive) 
+      (next: positive) (frames: PTrie.t frame) (init: objects)
+      (FR: ValidTopFrame p fr_id frames)
+      (NEXT: forall (fr: positive), In fr frs -> ValidMidFrame p fr frames),
+      ValidStack p (mkstack fr_id frs next frames init)
   .
