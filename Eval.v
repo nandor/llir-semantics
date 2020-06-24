@@ -15,8 +15,6 @@ Require Import LLIR.State.
 
 Import ListNotations.
 
-
-
 Definition set_frame (st: state) (fr: frame): state :=
   let stk := st.(st_stack) in
   {| st_stack :=
@@ -29,23 +27,7 @@ Definition set_frame (st: state) (fr: frame): state :=
    ; st_heap := st.(st_heap)
    |}.
 
-Axiom set_vreg: frame -> reg -> value -> frame.
-
-Axiom set_pc: frame -> node -> frame.
-
-Axiom set_vreg_pc: frame -> reg -> value -> node -> frame.
-
-Axiom step_binop: binop -> ty -> value -> value -> option value.
-
-Axiom step_unop: unop -> ty -> value -> option value.
-
-Axiom jump_to_phi: frame -> node -> frame.
-
 Axiom argext: ty -> value -> option value.
-
-Axiom load_from_object: objects -> positive -> positive -> ty -> option value.
-
-Axiom create_frame: func -> objects.
 
 Definition step_inst (fr: frame) (st: state) (i: inst): option state :=
   match i with

@@ -76,10 +76,7 @@ Qed.
 Inductive ValidFrame : prog -> frame -> Prop :=
   | valid_frame:
     forall
-      (p: prog) (fr: frame)
-      (fr_id: positive) (frames: PTrie.t frame)
-      (data: objects) (args: PTrie.t value)
-      (f: func) (i: inst)
+      (p: prog) (fr: frame) (f: func) (i: inst)
       (FUNC: Some f = p ! (fr.(fr_func)))
       (REACH: Reachable f (fr.(fr_pc)))
       (INST: Some i = f.(fn_insts) ! (fr.(fr_pc)))
@@ -130,3 +127,25 @@ Inductive ValidStack : prog -> stack -> Prop :=
       (NEXT: forall (fr: positive), In fr frs -> ValidMidFrame p fr frames),
       ValidStack p (mkstack fr_id frs next frames init)
   .
+
+Axiom set_vreg: frame -> reg -> value -> frame.
+
+Definition set_pc (fr: frame) (pc: node): frame :=
+  {| fr_data := fr_data fr
+   ; fr_regs := fr_regs fr
+   ; fr_args := fr_args fr
+   ; fr_func := fr_func fr
+   ; fr_pc := pc
+   |}.
+
+Axiom set_vreg_pc: frame -> reg -> value -> node -> frame.
+
+Axiom step_binop: binop -> ty -> value -> value -> option value.
+
+Axiom step_unop: unop -> ty -> value -> option value.
+
+Axiom jump_to_phi: frame -> node -> frame.
+
+Axiom load_from_object: objects -> positive -> positive -> ty -> option value.
+
+Axiom create_frame: func -> objects.

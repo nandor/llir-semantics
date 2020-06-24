@@ -135,7 +135,6 @@ Inductive InstDefs: inst -> reg -> Prop :=
       InstDefs (LLInvoke (Some (t, dst)) next callee args exn) dst
   .
 
-
 (* Returns the register defined by an instruction and its type. *)
 Definition get_inst_ty_def (i: inst): option (ty * reg) :=
   match i with
@@ -277,7 +276,56 @@ Inductive InstUses: inst -> reg -> Prop :=
       InstUses (LLJcc cond bt bf) cond
   .
 
-Inductive PhiUses: phi -> reg -> reg -> Prop :=
+(* Returns the list of registers used by an instruction. *)
+Definition get_inst_uses (i: inst): list reg :=
+  match i with
+  | LLLd _ _ addr => [addr]
+  | LLArg _ _ _ => []
+  | LLInt _ _ _ => []
+  | LLSelect _ _ cond vt vf => [cond; vt; vf]
+  | LLFrame _ _ _ _ => []
+  | LLGlobal _ _ _ _ _ => []
+  | LLFunc _ _ _ => []
+  | LLUndef _ _ => []
+  | LLUnop _ _ _ arg => [arg]
+  | LLBinop _ _ _ lhs rhs => [lhs; rhs]
+  | LLMov _ _ src => [src]
+  | LLSyscall _ _ sno args => sno :: args
+  | LLCall _ _ callee args => callee :: args
+  | LLInvoke _ _ callee args _ => callee :: args
+  | LLTCall callee args => callee :: args
+  | LLTInvoke callee args _ => callee :: args
+  | LLSt _ addr value => [addr; value]
+  | LLRet value =>
+    match value with
+    | None => []
+    | Some reg => [reg]
+    end
+  | LLJcc cond _ _ => [cond]
+  | LLJmp _ => []
+  | LLTrap => []
+  end.
+
+Lemma get_inst_uses_uses:
+  forall (i: inst) (r: reg),
+    In r (get_inst_uses i) <-> InstUses i r.
+Proof.
+  intros i r; split; intros H.
+  {
+    destruct i; simpl in H;
+      repeat match goal with
+      | [ H: False |- _ ] => inversion H
+      | [ H: _ \/ _ |- _ ] => destruct H
+      end; 
+      subst; try constructor; auto;
+      destruct value; inversion H; subst; try constructor; inversion H0.
+  }
+  {
+    inversion H; subst; simpl; auto.
+  }
+Qed.
+
+Inductive PhiUses: phi -> node -> reg -> Prop :=
   | phi_uses:
     forall (dst: (ty * reg)) (ins: list (node * reg)) (n: node) (r: reg)
       (ARG: In (n, r) ins),
@@ -524,8 +572,210 @@ Proof.
   + inversion H; simpl; reflexivity.
 Qed.
 
+Definition get_successors (i: inst) :=
+  match i with
+  | LLLd _ next _ => [next]
+  | LLArg _ next _ => [next]
+  | LLInt _ next _ => [next]
+  | LLMov _ next _ => [next]
+  | LLFrame _ next _ _ => [next]
+  | LLFunc _ next _ => [next]
+  | LLGlobal _ next _ _ _ => [next]
+  | LLUndef _ next => [next]
+  | LLUnop _ next _ _ => [next]
+  | LLBinop _ next _ _ _ => [next]
+  | LLSelect _ next _ _ _ => [next]
+  | LLSyscall _ next _ _ => [next]
+  | LLCall _ next _ _ => [next]
+  | LLInvoke _ next _ _ exn => [next; exn]
+  | LLTCall _ _ => []
+  | LLTInvoke _ _ exn => [exn]
+  | LLSt next _ _ => [next]
+  | LLRet _ => []
+  | LLJcc _ bt bf => [bt;bf]
+  | LLJmp target => [target]
+  | LLTrap => []
+  end.
+
+Lemma get_successors_correct:
+  forall (i: inst) (succ: node),
+    In succ (get_successors i) <-> Succeeds i succ.
+Proof.
+  split; intros H.
+  {
+    unfold get_successors in H.
+    destruct i; repeat destruct H as [H|H];
+    subst; try inversion H; constructor.
+  }
+  {
+    inversion H; simpl; auto.
+  }
+Qed.
+
 Section FUNCTION.
   Variable f: func.
+
+  Inductive SuccOf: node -> node -> Prop :=
+    | succ_of:
+        forall (n: node) (m: node) (i: inst)
+          (HN: Some i = f.(fn_insts) ! n)
+          (HM: None <> f.(fn_insts) ! m)
+          (SUCC: Succeeds i m),
+          SuccOf n m.
+
+  Lemma SuccOf_succ_dec:
+    forall (n: node),
+      {exists m, SuccOf n m} + {~exists m, SuccOf n m}.
+  Proof.
+    intros n.
+    destruct (f.(fn_insts) ! n) as [inst|] eqn:Einst.
+    {
+      remember (get_successors inst) as succs eqn:Esuccs.
+      destruct inst; simpl in Esuccs;
+        try match goal with
+        | [ Esuccs: succs = [?succ]
+          , Einst: (fn_insts f) ! n = Some ?inst 
+          |- _ ] =>
+            destruct (fn_insts f) ! succ as [inst'|] eqn:Esucc;
+              [ left; exists succ; apply succ_of with inst;
+                [ auto
+                | intros contra; rewrite Esucc in contra; inversion contra
+                | constructor
+                ]
+              | right; intros contra; destruct contra as [next' Hnext]; 
+                inversion Hnext; subst;
+                rewrite Einst in HN; inversion HN; subst i;
+                apply get_successors_correct in SUCC; simpl in SUCC; 
+                destruct SUCC; auto;
+                subst next';
+                rewrite Esucc in HM;
+                contradiction
+              ]
+        | [ Esuccs: succs = [] |- _ ] =>
+          right; intros contra; destruct contra as [next' Hnext];
+          inversion Hnext; subst;
+          rewrite Einst in HN; inversion HN; subst i;
+          apply get_successors_correct in SUCC; simpl in SUCC;
+          contradiction
+        | [ Esuccs: succs = [?succ0; ?succ1]
+          , Einst: (fn_insts f) ! n = Some ?inst
+          |- _ ] =>
+            destruct (fn_insts f) ! succ0 as [inst0|] eqn:Einst0;
+              [ left; exists succ0; apply succ_of with inst;
+                [ auto
+                | intros contra; rewrite Einst0 in contra; inversion contra
+                | constructor
+                ]
+              | destruct (fn_insts f) ! succ1 as [inst1|] eqn:Einst1;
+                [ left; exists succ1; apply succ_of with inst;
+                  [ auto
+                  | intros contra; rewrite Einst1 in contra; inversion contra
+                  | constructor
+                  ]
+                | right; intros contra; destruct contra as [next' Hnext];
+                  inversion Hnext; subst;
+                  rewrite Einst in HN; inversion HN; subst i;
+                  apply get_successors_correct in SUCC; simpl in SUCC;
+                  repeat destruct SUCC as [SUCC|SUCC]; subst;
+                  try rewrite Einst0 in HM;
+                  try rewrite Einst1 in HM;
+                  contradiction
+                ]
+            ]
+        end.
+    }
+    {
+      right.
+      intros contra; destruct contra as [m contra]; inversion contra.
+      rewrite Einst in HN; inversion HN.
+    }
+  Qed.
+
+  Definition get_predecessors (n: node) :=
+    match f.(fn_insts) ! n with
+    | None => []
+    | Some _ =>
+      PTrie.keys
+        (PTrie.filter (fun k v =>
+          let succs := get_successors v in
+          List.existsb (fun succ => Pos.eqb succ n) succs
+        ) f.(fn_insts))
+    end.
+
+  Lemma get_predecessors_correct:
+    forall (n: node) (pred: node),
+      In pred (get_predecessors n) <-> SuccOf pred n.
+  Proof.
+    intros n pred; split.
+    {
+      intros Hin.
+      unfold get_predecessors in Hin.
+      destruct ((fn_insts f) ! n) eqn:Einst.
+      {
+        apply PTrie.keys_inversion in Hin.
+        destruct Hin as [k Hin].
+        apply PTrie.map_opt_inversion in Hin.
+        destruct Hin as [inst [Hinst Hpred]].
+        apply succ_of with (i := inst); auto.
+        { intros contra. rewrite Einst in contra. inversion contra. }
+        {
+          unfold get_successors in Hpred. unfold existsb in Hpred.
+          destruct inst; simpl;
+            repeat match goal with
+            | [ H: context [ Pos.eqb ?v n ] |- _ ] =>
+              destruct (Pos.eqb v n) eqn:E;
+              simpl in H;
+              [apply Pos.eqb_eq in E; subst; constructor|clear E]
+            | [ H: Some ?v = None |- _ ] =>
+              inversion H
+            end.
+        }
+      }
+      {
+        inversion Hin.
+      }
+    }
+    {
+      intros Hsucc.
+      inversion Hsucc.
+      destruct ((fn_insts f) ! n) as [inst'|] eqn:En; try contradiction.
+      unfold get_predecessors.
+      rewrite En. subst. clear HM.
+      apply PTrie.keys_correct with (v := i).
+      apply PTrie.filter_correct; auto.
+      apply List.existsb_exists. exists n.
+      split; [|apply Pos.eqb_eq; reflexivity].
+      destruct i; inversion SUCC; simpl; auto.
+    }
+  Qed.
+
+  Lemma SuccOf_pred_dec:
+    forall (m: node),
+      {exists n, SuccOf n m} + {~exists n, SuccOf n m}.
+  Proof.
+    intros m.
+    destruct ((fn_insts f) ! m) as [inst_m|] eqn:Einst_m.
+    {
+      remember (get_predecessors m) as preds eqn:Epreds.
+      destruct preds.
+      {
+        right; intros contra; destruct contra as [n Hsucc].
+        apply get_predecessors_correct in Hsucc.
+        rewrite <- Epreds in Hsucc.
+        inversion Hsucc.
+      }
+      {
+        left; exists k. 
+        apply get_predecessors_correct.
+        rewrite <- Epreds.
+        left; auto.
+      }
+    }
+    {
+      right; intros contra; destruct contra as [n Hsucc]; inversion Hsucc;
+      rewrite Einst_m in HM; contradiction.
+    }
+  Qed.
 
   Inductive InstDefinedAt: node -> reg -> Prop :=
     | inst_defined_at:
@@ -646,6 +896,7 @@ Section FUNCTION.
   Inductive PhiUsedAt: node -> reg -> Prop :=
     | phi_used_at:
       forall (n: node) (r: reg) (block: node) (phis: list phi)
+        (SUCC: SuccOf n block)
         (PHIS: Some phis = f.(fn_phis) ! block)
         (USES: PhiBlockUses phis n r),
         PhiUsedAt n r
@@ -660,13 +911,163 @@ Section FUNCTION.
         UsedAt n r
     .
 
-  Inductive SuccOf: node -> node -> Prop :=
-    | succ_of:
-        forall (n: node) (m: node) (i: inst)
-          (HN: Some i = f.(fn_insts) ! n)
-          (HM: None <> f.(fn_insts) ! m)
-          (SUCC: Succeeds i m),
-          SuccOf n m.
+  Lemma inst_used_at_dec:
+    forall (n: node) (r: reg),
+      {InstUsedAt n r} + {~InstUsedAt n r}.
+  Proof.
+    intros n r.
+    destruct ((fn_insts f) ! n) as [inst|] eqn:Einst.
+    {
+      destruct (in_dec Pos.eq_dec r (get_inst_uses inst)) as [In|NotIn].
+      {
+        left; apply inst_used_at with inst; auto.
+        apply get_inst_uses_uses; auto.
+      }
+      {
+        right; intros contra; inversion contra; subst.
+        apply get_inst_uses_uses in USES.
+        rewrite Einst in INST; inversion INST; subst.
+        contradiction.
+      }
+    }
+    {
+      right; intros contra; inversion contra; subst;
+      rewrite Einst in INST; inversion INST.
+    }
+  Qed.
+
+  Lemma phi_in_dec:
+    forall (a: (node * reg)) (b: (node * reg)),
+      {a = b} + {a <> b}.
+  Proof.
+    destruct a as [an ar]; destruct b as [bn br].
+    destruct (Pos.eq_dec an bn);
+    destruct (Pos.eq_dec ar br);
+    subst; 
+    try (left; reflexivity);
+    right; intros contra; inversion contra; subst; contradiction.
+  Qed.
+
+  Lemma phi_uses_dec:
+    forall (p: phi) (n: node) (r: reg),
+      {PhiUses p n r} + {~PhiUses p n r}.
+  Proof.
+    destruct p; intros n r.
+    destruct (in_dec phi_in_dec (n, r) ins) as [Ein|Enot_in].
+    {
+      left; constructor; auto.
+    }
+    {
+      right; intros contra; inversion contra; subst; contradiction.
+    }
+  Qed.
+
+  Lemma phi_block_uses_dec:
+    forall (phis: list phi) (n: node) (r: reg),
+      {PhiBlockUses phis n r} + {~PhiBlockUses phis n r}.
+  Proof.
+    induction phis; intros n r.
+    { right; intros contra; inversion contra. }
+    {
+      destruct (IHphis n r) as [Ein|Enot_in].
+      {
+        left; apply Exists_exists.
+        apply Exists_exists in Ein; inversion Ein; destruct H.
+        exists x; split; auto; right; auto.
+      }
+      {
+        destruct (phi_uses_dec a n r) as [Epin|Enot_pin].
+        {
+          left; apply Exists_exists; exists a; split; auto.
+          left; reflexivity.
+        }
+        {
+          right; intros contra.
+          inversion contra; try contradiction.
+        }
+      }
+    }
+  Qed.
+
+  Lemma phi_used_at_dec:
+    forall (n: node) (r:reg),
+      {PhiUsedAt n r} + {~PhiUsedAt n r}.
+  Proof.
+    intros n r.
+    destruct ((fn_insts f) ! n) as [inst_n|] eqn:Esome_inst_n.
+    {
+      remember (get_successors inst_n) as succ_n eqn:Esucc_n.
+      destruct inst_n eqn:Einst_n; simpl in Esucc_n;
+        try match goal with
+        | [ Esucc_n: succ_n = [?next] |- _ ] =>
+          destruct ((fn_phis f) ! next) as [phis_next|] eqn:Ephis_next;
+          [ destruct ((fn_insts f) ! next) as [inst_next|] eqn:Einst_next;
+            [ destruct (phi_block_uses_dec phis_next n r) as [Euse|Eno_use];
+              [ left; apply phi_used_at with next phis_next; auto;
+                apply succ_of with inst_n; subst; auto; try constructor;
+                intros contra; rewrite Einst_next in contra; inversion contra
+              | right; intros contra; inversion contra;
+                inversion SUCC; apply get_successors_correct in SUCC0;
+                rewrite Esome_inst_n in HN; inversion HN; clear HN; subst;
+                simpl in SUCC0;
+                repeat destruct SUCC0 as [SUCC0|SUCC0]; subst; try contradiction;
+                rewrite Ephis_next in PHIS; inversion PHIS; subst;
+                contradiction
+              ]
+            | right; intros contra; inversion contra; inversion SUCC;
+              rewrite Esome_inst_n in HN; inversion HN; clear HN; subst;
+              apply get_successors_correct in SUCC0; simpl in SUCC0;
+              repeat destruct SUCC0 as [SUCC0|SUCC0]; subst; try contradiction;
+              rewrite Einst_next in HM; contradiction
+            ]
+          | right; intros contra; inversion contra; inversion SUCC; subst;
+            rewrite Esome_inst_n in HN; inversion HN; subst;
+            apply get_successors_correct in SUCC0; simpl in SUCC0;
+            repeat destruct SUCC0 as [SUCC0|SUCC0]; subst; try contradiction;
+            rewrite Ephis_next in PHIS; inversion PHIS
+          ]
+        | [ Esucc_n: succ_n = [] |- _ ] =>
+          right; intros contra; inversion contra; inversion SUCC; subst;
+          rewrite Esome_inst_n in HN; inversion HN; subst;
+          apply get_successors_correct in SUCC0; subst; simpl in SUCC0;
+          contradiction
+        | [ Esucc_n: succ_n = [?s0; ?s1] |- _ ] =>
+          destruct ((fn_phis f) ! s0) as [phis_s0|] eqn:Ephis_s0;
+          destruct ((fn_phis f) ! s1) as [phis_s1|] eqn:Ephis_s1;
+          destruct ((fn_insts f) ! s0) as [inst_s0|] eqn:Einst_s0;
+          destruct ((fn_insts f) ! s1) as [inst_s1|] eqn:Einst_s1;
+          try destruct (phi_block_uses_dec phis_s0 n r) as [Euse_s0|Eno_use_s0];
+          try destruct (phi_block_uses_dec phis_s1 n r) as [Euse_s1|Eno_use_s1];
+          try match goal with
+          | [ Hphi: (fn_phis f) ! ?s0 = Some ?phis
+            , Hinst: (fn_insts f) ! ?s0 = Some _
+            , Hblock_use: PhiBlockUses ?phis n r 
+            |- _ 
+            ] =>
+            left;
+            apply phi_used_at with s0 phis; auto;
+            apply succ_of with inst_n;
+              [ subst; auto
+              | intros contra; rewrite Hinst in contra; inversion contra
+              | subst inst_n; constructor
+              ]
+          end;
+          right; intros contra; inversion contra; inversion SUCC;
+          rewrite Esome_inst_n in HN; inversion HN; clear HN; subst;
+          inversion SUCC0; subst;
+          match goal with
+          | [ Hinst: (fn_insts f) ! ?n = None, Hnone: None <> (fn_insts f) ! ?n |- _ ] =>
+            rewrite Hinst in Hnone; contradiction
+          | [ Hphi0: (fn_phis f) ! ?n = _, Hphi1: _ = (fn_phis f) ! ?n |- _ ] =>
+            rewrite Hphi0 in Hphi1; inversion Hphi1; clear Hphi1; subst; contradiction
+          end
+        end.
+    }
+    {
+      right; intros contra; inversion contra; inversion SUCC;
+      rewrite Esome_inst_n in HN; inversion HN.
+    }
+  Qed.
 
   Inductive TermAt: node -> Prop :=
     | term_at:
@@ -687,8 +1088,8 @@ Section FUNCTION.
     {
       destruct i eqn:Ei;
         try (
-          assert (TermAt n); 
-          [apply term_at with i; subst; auto; constructor|]; 
+          assert (TermAt n);
+          [apply term_at with i; subst; auto; constructor|];
           contradiction
         );
         inversion Hsucc; inversion Hsucc';
@@ -720,101 +1121,3 @@ Section FUNCTION.
   Qed.
 End FUNCTION.
 
-Definition get_successors (i: inst) :=
-  match i with
-  | LLLd _ next _ => [next]
-  | LLArg _ next _ => [next]
-  | LLInt _ next _ => [next]
-  | LLMov _ next _ => [next]
-  | LLFrame _ next _ _ => [next]
-  | LLFunc _ next _ => [next]
-  | LLGlobal _ next _ _ _ => [next]
-  | LLUndef _ next => [next]
-  | LLUnop _ next _ _ => [next]
-  | LLBinop _ next _ _ _ => [next]
-  | LLSelect _ next _ _ _ => [next]
-  | LLSyscall _ next _ _ => [next]
-  | LLCall _ next _ _ => [next]
-  | LLInvoke _ next _ _ exn => [next; exn]
-  | LLTCall _ _ => []
-  | LLTInvoke _ _ exn => [exn]
-  | LLSt next _ _ => [next]
-  | LLRet _ => []
-  | LLJcc _ bt bf => [bt;bf]
-  | LLJmp target => [target]
-  | LLTrap => []
-  end.
-
-Lemma get_successors_correct:
-  forall (i: inst) (succ: node),
-    In succ (get_successors i) <-> Succeeds i succ.
-Proof.
-  split; intros H.
-  {
-    unfold get_successors in H.
-    destruct i; repeat destruct H as [H|H];
-    subst; try inversion H; constructor.
-  }
-  {
-    inversion H; simpl; auto.
-  }
-Qed.
-
-Definition get_predecessors (f: func) (n: node) :=
-  match f.(fn_insts) ! n with
-  | None => []
-  | Some _ =>
-    PTrie.keys
-      (PTrie.filter (fun k v =>
-        let succs := get_successors v in
-        List.existsb (fun succ => Pos.eqb succ n) succs
-      ) f.(fn_insts))
-  end.
-
-Lemma get_predecessors_correct:
-  forall (f: func) (n: node) (pred: node),
-    In pred (get_predecessors f n) <-> SuccOf f pred n.
-Proof.
-  intros f n pred.
-  split.
-  {
-    intros Hin.
-    unfold get_predecessors in Hin.
-    destruct ((fn_insts f) ! n) eqn:Einst.
-    {
-      apply PTrie.keys_inversion in Hin.
-      destruct Hin as [k Hin].
-      apply PTrie.map_opt_inversion in Hin.
-      destruct Hin as [inst [Hinst Hpred]].
-      apply succ_of with (i := inst); auto.
-      { intros contra. rewrite Einst in contra. inversion contra. }
-      {
-        unfold get_successors in Hpred. unfold existsb in Hpred.
-        destruct inst; simpl;
-          repeat match goal with
-          | [ H: context [ Pos.eqb ?v n ] |- _ ] =>
-            destruct (Pos.eqb v n) eqn:E;
-            simpl in H;
-            [apply Pos.eqb_eq in E; subst; constructor|clear E]
-          | [ H: Some ?v = None |- _ ] =>
-            inversion H
-          end.
-      }
-    }
-    {
-      inversion Hin.
-    }
-  }
-  {
-    intros Hsucc.
-    inversion Hsucc.
-    destruct ((fn_insts f) ! n) as [inst'|] eqn:En; try contradiction.
-    unfold get_predecessors.
-    rewrite En. subst. clear HM.
-    apply PTrie.keys_correct with (v := i).
-    apply PTrie.filter_correct; auto.
-    apply List.existsb_exists. exists n.
-    split; [|apply Pos.eqb_eq; reflexivity].
-    destruct i; inversion SUCC; simpl; auto.
-  }
-Qed.

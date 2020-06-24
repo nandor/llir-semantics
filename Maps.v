@@ -243,6 +243,14 @@ Module PTrie <: PARTIAL_MAP.
         try contradiction;
         intros contra; subst k; contradiction.
     Qed.
+
+    Theorem update_eq:
+      forall (k: key) (a: t V),
+        get (update a k) k = option_map f (get a k).
+    Proof.
+      intros k a.
+      destruct (update_correct k a) as [H _]; apply H.
+    Qed.
   End UPDATE.
 
   Fixpoint append (l: positive) (r: positive): positive :=

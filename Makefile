@@ -21,6 +21,8 @@ PROOFS=\
 	Syscall.vo\
 	Eval.vo\
 	SmallStep.vo\
+	SmallStep_Progress.vo\
+	SmallStep_Valid.vo\
 	Closure.vo\
 	Transform.vo\
 	Dom.vo\

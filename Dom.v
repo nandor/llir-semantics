@@ -4,6 +4,7 @@
 
 Require Import Coq.ZArith.ZArith.
 Require Import Coq.Lists.List.
+Require Import Coq.Program.Equality.
 
 Require Import LLIR.Values.
 Require Import LLIR.LLIR.
@@ -200,6 +201,83 @@ Section FUNCTION.
         apply closure_step. apply HD.
     }
     apply reach_entry.
+  Qed.
+
+  Inductive ReversePath: node -> list node -> node -> Prop :=
+    | reverse_path_nil:
+      forall (n: node)
+        (REACH: Reachable n),
+        ReversePath n [n] n
+    | reverse_path_cons:
+      forall (from: node) (next: node) (to: node) (p: list node)
+        (REACH: Reachable from)
+        (TL: ReversePath next p to)
+        (HD: SuccOf f from next),
+        ReversePath from (from :: p) to.
+
+  Theorem reverse_path_app:
+    forall (xy: list node) (yz: list node) (x: node) (y: node) (z: node),
+      ReversePath x xy y ->
+      ReversePath y (y::yz) z ->
+      ReversePath x (xy ++ yz) z.
+  Proof.
+    induction xy; intros yz x y z Hxy Hyz.
+    { inversion Hxy. }
+    {
+      rewrite <- app_comm_cons.
+      inversion Hxy; subst; simpl; auto.
+      apply reverse_path_cons with next; auto.
+      apply (IHxy yz next y z); auto.
+    }
+  Qed.
+
+  Remark rev_nil_nil: forall (A: Type) (p: list A),
+    rev p = [] -> p = [].
+  Proof.
+    intros A p Hrev.
+    destruct p; auto.
+    simpl in Hrev.
+    apply app_eq_nil in Hrev.
+    destruct Hrev; inversion H0.
+  Qed.
+
+  Theorem path_reverse_path:
+    forall (from: node) (to: node) (p: list node),
+      Path from p to <-> ReversePath from (rev p) to.
+  Proof.
+    intros from to p; split; intros Hpath. 
+    {
+      induction Hpath; simpl.
+      { constructor; auto. }
+      {
+        apply reverse_path_app with (y := next); auto.
+        apply reverse_path_cons with (next := to); auto.
+        - apply path_reaches_end with (x := from) (path := p); auto.
+        - apply reverse_path_nil.
+          apply reach_succ with (a := next); auto.
+          apply path_reaches_end with (x := from) (path := p); auto.
+      }
+    }
+    {
+      dependent induction Hpath.
+      {
+        destruct p; [inversion x|].
+        simpl in x; symmetry in x.
+        apply app_eq_unit in x.
+        destruct x as [[Hl Hr]|[_ H']].
+        { apply rev_nil_nil in Hl; inversion Hr; subst; constructor; auto. }
+        { inversion H'. }
+      }
+      {
+        assert (H: rev (from :: p0) = rev (rev p)). { rewrite x; auto. }
+        rewrite rev_involutive in H.
+        simpl in H.
+        subst p; clear x.
+        apply path_app with next.
+        { apply path_cons with from; auto; constructor; auto. }
+        { apply IHHpath. rewrite rev_involutive. reflexivity. }
+      }
+    }
   Qed.
 
   Inductive Dominates: node -> node -> Prop :=
